@@ -11,3 +11,15 @@ venv/
 env/
 .venv/
 .env/
+
+# Checkpoints
+checkpoints*
+
+# Episodes
+episodes*
+
+# Visualizations
+viz_out/
+
+# Logs
+*.log

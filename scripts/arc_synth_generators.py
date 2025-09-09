@@ -1,57 +1,54 @@
+"""ARC synthetic task generators with uniqueness enforcement and CLI.
+
+This module creates small ARC-like tasks as JSON files. Each task generator
+returns an input/output grid pair. A simple uniqueness mechanism ensures
+that train and test sets do not contain duplicate pairs and are disjoint.
+
+CLI commands:
+- make: generate one task JSON
+- make_all: generate all registered tasks
+- verify: validate uniqueness and disjointness for an existing JSON
 """
-ARC synthetic task generators for 5 selected puzzles.
-
-Tasks covered:
-1) bb43febb  – Replace the interior of each solid 5-rectangle by 2; keep 5-borders.
-2) c9f8e694  – Row label recolor: each row's label at col 0 recolors all 5s in that row.
-3) cbd:ed52d – 3x3 grid of 2x2 tiles (separated by 0s); propagate hints by tile-row/column.
-4) d4a91cb9  – Draw an L path of 4s from 8 to 2 (vertical first, then horizontal).
-5) d6ad076f  – Bridge two solid rectangles with 8s across their gap (see rule below).
-
-Notes for d6ad076f:
-- Two solid rectangles (colors != 0,8), non-overlapping, either stacked (vertical gap with horizontal interior overlap)
-  or side-by-side (horizontal gap with vertical interior overlap).
-- Let g be the gap thickness along the separation axis (strict zeros between rects).
-- Let o be the thickness of the *interior overlap* (excluding outer borders) along the orthogonal axis.
-- Output adds an 8-rectangle spanning: gap size g along the separation axis, and min(o, g) along the orthogonal axis,
-  anchored at the start of the interior overlap band (left for stacked; top for side-by-side).
-
-Everything is done with pure Python lists (no numpy). Adjust counts and seeds in the __main__ block as needed.
-"""
-
 import json
 import os
 import random
-from copy import deepcopy
+import hashlib
 from dataclasses import dataclass
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
+from copy import deepcopy
+
+try:
+    from tqdm import tqdm
+except Exception:
+    tqdm = None
 
 Grid = List[List[int]]
 
-# -------------------- basic helpers --------------------
-
+# -------------------- helpers --------------------
 def zeros(h: int, w: int) -> Grid:
+    """Create an h x w grid filled with 0s."""
     return [[0 for _ in range(w)] for _ in range(h)]
 
 def draw_rect(grid: Grid, top: int, left: int, height: int, width: int, color: int) -> None:
-    """Fill an axis-aligned solid rectangle (inclusive area)."""
+    """Fill an axis-aligned rectangle on grid in-place with color."""
     for r in range(top, top + height):
         for c in range(left, left + width):
             grid[r][c] = color
 
 def rect_interior(top: int, left: int, height: int, width: int) -> Tuple[int, int, int, int]:
-    """
-    Return (top, left, height, width) of the *interior* (excluding borders).
-    If interior is empty (height<3 or width<3), returns a zero-sized shape (h or w <= 0).
+    """Return the interior rectangle (top,left,height,width) excluding 1-cell border.
+    If the rectangle is too small, returns zero-sized interior (height or width = 0).
     """
     if height < 3 or width < 3:
         return (top+1, left+1, 0, 0)
     return (top + 1, left + 1, height - 2, width - 2)
 
 def place_non_overlapping_rectangles(h: int, w: int, n: int, min_hw=(3,3), max_trials=500) -> List[Tuple[int,int,int,int]]:
-    """
-    Randomly place up to n solid rectangles (top,left,height,width) without overlap.
-    Touching edges is not allowed; positive-area overlap is forbidden.
+    """Sample up to n rectangles without overlap inside an h x w canvas.
+
+    Rectangles are axis-aligned and must not overlap or touch. The function
+    retries up to max_trials candidates and returns the list found so far.
+    Each rectangle is returned as (top, left, height, width).
     """
     rects = []
     trials = 0
@@ -62,7 +59,6 @@ def place_non_overlapping_rectangles(h: int, w: int, n: int, min_hw=(3,3), max_t
         top = random.randint(0, h - rh)
         left = random.randint(0, w - rw)
         candidate = (top, left, rh, rw)
-        # forbid positive-area overlap
         overlap = False
         for (t,l,hh,ww) in rects:
             if not (top+rh < t or t+hh < top or left+rw < l or l+ww < left):
@@ -73,18 +69,19 @@ def place_non_overlapping_rectangles(h: int, w: int, n: int, min_hw=(3,3), max_t
     return rects
 
 def to_arc_examples(pairs: List[Tuple[Grid, Grid]]) -> List[Dict[str, Grid]]:
+    """Convert list of (input, output) grid pairs to ARC JSON example dicts."""
     return [{"input": pin, "output": pout} for (pin, pout) in pairs]
 
 def save_task_json(path: str, train_pairs: List[Tuple[Grid,Grid]], test_pairs: List[Tuple[Grid,Grid]]) -> None:
+    """Write ARC-style JSON with 'train' and 'test' lists of examples."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     obj = {"train": to_arc_examples(train_pairs), "test": to_arc_examples(test_pairs)}
     with open(path, "w") as f:
         json.dump(obj, f)
 
 # -------------------- Task 1: bb43febb --------------------
-# Rule: One or more solid rectangles of color 5. Replace the interior of each with color 2.
-
 def gen_bb43febb_single(h: int = 10, w: int = 10) -> Tuple[Grid, Grid]:
+    """Replace interior of each solid color-5 rectangle with color 2."""
     grid = zeros(h, w)
     rects = place_non_overlapping_rectangles(h, w, n=random.randint(1, 3), min_hw=(3,3))
     for (t,l,hh,ww) in rects:
@@ -97,23 +94,15 @@ def gen_bb43febb_single(h: int = 10, w: int = 10) -> Tuple[Grid, Grid]:
                 out[r][c] = 2
     return grid, out
 
-def gen_bb43febb(n_train=20, n_test=5, h: int = 10, w: int = 10, seed: int = 0):
-    random.seed(seed)
-    train = [gen_bb43febb_single(h, w) for _ in range(n_train)]
-    test  = [gen_bb43febb_single(h, w) for _ in range(n_test)]
-    return train, test
-
 # -------------------- Task 2: c9f8e694 --------------------
-# Rule: Each row has a label (col 0, non-zero and != 5). Replace all 5s in that row by the label color.
-
 def gen_c9f8e694_single(h: int = 12, w: int = 12, label_palette: List[int] = None) -> Tuple[Grid, Grid]:
+    """Row label recolor: row's label at col 0 recolors all 5s in that row."""
     if label_palette is None:
-        label_palette = [c for c in range(1,10) if c != 5]  # avoid 0 and 5
+        label_palette = [c for c in range(1,10) if c != 5]
     grid = zeros(h, w)
     for r in range(h):
         label = random.choice(label_palette)
         grid[r][0] = label
-        # place 0..2 separate 5-blocks in the row
         k_blocks = random.randint(0, 2)
         for _ in range(k_blocks):
             bw = random.randint(2, max(2, w//3))
@@ -128,20 +117,12 @@ def gen_c9f8e694_single(h: int = 12, w: int = 12, label_palette: List[int] = Non
                 out[r][c] = label
     return grid, out
 
-def gen_c9f8e694(n_train=20, n_test=5, h: int = 12, w: int = 12, seed: int = 1):
-    random.seed(seed)
-    train = [gen_c9f8e694_single(h, w) for _ in range(n_train)]
-    test  = [gen_c9f8e694_single(h, w) for _ in range(n_test)]
-    return train, test
-
-# -------------------- Task 3: cbd:ed52d --------------------
-# Rule: 3x3 tiles of size 2x2 with zero separators at rows/cols 2 and 5. Base color inside tiles is 1.
-# Hints (non-1 colors) placed at TL/TR/BL/BR positions propagate across the entire tile-row and tile-column.
-
+# -------------------- Task 3: cbd:ed52d (two-of-three) --------------------
 TILE_SIZE = 2
-SEP_POS = [2, 5]  # zero rows/cols (separators)
+SEP_POS = [2, 5]
 
 def make_tiled_base() -> Grid:
+    """Create 3x3 grid of 2x2 tiles separated by 0s; tiles pre-filled with 1s."""
     h = 8; w = 8
     g = zeros(h, w)
     for r in range(h):
@@ -153,9 +134,9 @@ def make_tiled_base() -> Grid:
     return g
 
 def tile_rc_to_abs(rtile: int, ctile: int, pos: str) -> Tuple[int,int]:
-    # rtile, ctile in {0,1,2}. pos ∈ {"TL","TR","BL","BR"}.
-    r0 = rtile * (TILE_SIZE + 1)   # +1 for separator row
-    c0 = ctile * (TILE_SIZE + 1)   # +1 for separator col
+    """Map tile coordinates and corner name to absolute grid indices."""
+    r0 = rtile * (TILE_SIZE + 1)
+    c0 = ctile * (TILE_SIZE + 1)
     if pos == "TL": return (r0 + 0, c0 + 0)
     if pos == "TR": return (r0 + 0, c0 + 1)
     if pos == "BL": return (r0 + 1, c0 + 0)
@@ -164,36 +145,23 @@ def tile_rc_to_abs(rtile: int, ctile: int, pos: str) -> Tuple[int,int]:
 
 def gen_cbded52d_single() -> Tuple[Grid, Grid]:
     """
-    Generate a (input, output) pair for the cbd:ed52d task using the *two-of-three* rule:
-
-    - Work on a 3x3 board of 2x2 tiles (separated by 0-rows/cols). Inside tiles default to color 1.
-    - We place some hints (non-1 colors) at TL/TR/BL/BR positions inside tiles.
-    - OUTPUT RULE:
-        * Row-wise: if a tile-row has exactly TWO hints at the same relative position and same color,
-          fill the remaining third tile at that position with that color. If only one hint, ignore.
-        * Column-wise: same rule for tile-columns.
-      If a cell would be completed by both row and column rules, this generator couples colors to avoid conflicts.
+    Two-of-three rule:
+    - In each tile-row/column and relative position (TL/TR/BL/BR), if there are EXACTLY TWO hints
+      with the same color, fill the remaining third. Singles are ignored.
     """
     g = make_tiled_base()
     positions = ["TL", "TR", "BL", "BR"]
-    color_choices = [2,3,4,5,6,7,8,9]  # non-1, non-zero
-
-    # Hints live at (rtile, ctile, pos) -> color
+    color_choices = [2,3,4,5,6,7,8,9]
     hints: Dict[Tuple[int,int,str], int] = {}
+    row_patterns: Dict[Tuple[int,str], Tuple[Tuple[int,int], int]] = {}
+    col_patterns: Dict[Tuple[int,str], Tuple[Tuple[int,int], int]] = {}
 
-    # Keep track of the explicit "two-hint patterns" we add so we can couple colors if completions cross.
-    row_patterns: Dict[Tuple[int,str], Tuple[Tuple[int,int], int]] = {}  # (rt,pos) -> ((c1,c2), color)
-    col_patterns: Dict[Tuple[int,str], Tuple[Tuple[int,int], int]] = {}  # (ct,pos) -> ((r1,r2), color)
-
-    # ---- helpers ----
     def creates_two_of_three(rt: int, ct: int, pos: str) -> bool:
-        """Would adding a single hint here accidentally create a 2-of-3 in its row/column?
-        We use this to place 'single' hints that are meant to be ignored by the rule."""
         row_cols = [cc for (rr,cc,pp),_ in hints.items() if rr == rt and pp == pos]
         col_rows = [rr for (rr,cc,pp),_ in hints.items() if cc == ct and pp == pos]
         return (len(row_cols) + 1) == 2 or (len(col_rows) + 1) == 2
 
-    # ---- place some row patterns (exactly TWO hints in a row at the same pos) ----
+    # Row patterns (exactly two)
     num_row_patterns = random.randint(1, 2)
     tries = 0
     while len(row_patterns) < num_row_patterns and tries < 100:
@@ -204,21 +172,17 @@ def gen_cbded52d_single() -> Tuple[Grid, Grid]:
             continue
         c1, c2 = random.sample([0,1,2], 2)
         color = random.choice(color_choices)
-
-        # Unify with any existing hints already placed at those locations
         ex_colors = [hints.get((rt, c, pos)) for c in (c1, c2)]
         ex_colors = [x for x in ex_colors if x is not None]
         if len(ex_colors) == 2 and ex_colors[0] != ex_colors[1]:
-            continue  # conflicting colors already there; try another choice
+            continue
         if len(ex_colors) == 1:
             color = ex_colors[0]
-
-        # Place the two hints
         hints[(rt, c1, pos)] = color
         hints[(rt, c2, pos)] = color
         row_patterns[(rt, pos)] = ((c1, c2), color)
 
-    # ---- place some column patterns (exactly TWO hints in a column at the same pos) ----
+    # Column patterns (exactly two), color-coupled with crossing row-completions
     num_col_patterns = random.randint(1, 2)
     tries = 0
     while len(col_patterns) < num_col_patterns and tries < 100:
@@ -229,32 +193,23 @@ def gen_cbded52d_single() -> Tuple[Grid, Grid]:
             continue
         r1, r2 = random.sample([0,1,2], 2)
         color = random.choice(color_choices)
-
-        # Unify with existing hints at those two locations if present
         ex_colors = [hints.get((r, ct, pos)) for r in (r1, r2)]
         ex_colors = [x for x in ex_colors if x is not None]
         if len(ex_colors) == 2 and ex_colors[0] != ex_colors[1]:
             continue
         if len(ex_colors) == 1:
             color = ex_colors[0]
-
-        # ALSO couple with any crossing row completion to avoid conflicting completions:
-        #   If for this column pattern the missing row is r3,
-        #   and there exists a row pattern (r3,pos) whose missing column is exactly ct,
-        #   then force the column pattern's color to the row pattern's color.
         missing_row = ({0,1,2} - {r1, r2}).pop()
         if (missing_row, pos) in row_patterns:
             (c_pair, row_color) = row_patterns[(missing_row, pos)]
             missing_col = ({0,1,2} - set(c_pair)).pop()
             if missing_col == ct:
-                color = row_color  # couple colors to avoid a future conflict
-
-        # Place the two hints
+                color = row_color
         hints[(r1, ct, pos)] = color
         hints[(r2, ct, pos)] = color
         col_patterns[(ct, pos)] = ((r1, r2), color)
 
-    # ---- optionally place a few single hints that the rule should IGNORE ----
+    # Optional singles (ignored by the rule)
     num_singles = random.randint(0, 2)
     tries = 0
     while num_singles > 0 and tries < 200:
@@ -265,19 +220,18 @@ def gen_cbded52d_single() -> Tuple[Grid, Grid]:
         if (rt, ct, pos) in hints:
             continue
         if creates_two_of_three(rt, ct, pos):
-            continue  # would accidentally form a 2-of-3; skip
+            continue
         hints[(rt, ct, pos)] = random.choice(color_choices)
         num_singles -= 1
 
-    # ---- build INPUT grid with hints ----
+    # INPUT grid
     for (rt, ct, pos), col in hints.items():
         r, c = tile_rc_to_abs(rt, ct, pos)
         g[r][c] = col
 
-    # ---- build OUTPUT grid: apply two-of-three completions ----
+    # OUTPUT grid (apply completions)
     out = deepcopy(g)
-
-    # Row-wise completion: if exactly TWO hints (same color), fill the missing third
+    # Row-wise
     for rt in range(3):
         for pos in positions:
             entries = [(ct, hints[(rt, ct, pos)]) for ct in range(3) if (rt, ct, pos) in hints]
@@ -285,29 +239,20 @@ def gen_cbded52d_single() -> Tuple[Grid, Grid]:
                 missing_ct = ({0,1,2} - {entries[0][0], entries[1][0]}).pop()
                 r, c = tile_rc_to_abs(rt, missing_ct, pos)
                 out[r][c] = entries[0][1]
-
-    # Column-wise completion: same, but don't overwrite a cell already set by the row rule
+    # Column-wise (don't overwrite row completions)
     for ct in range(3):
         for pos in positions:
             entries = [(rt, hints[(rt, ct, pos)]) for rt in range(3) if (rt, ct, pos) in hints]
             if len(entries) == 2 and entries[0][1] == entries[1][1]:
                 missing_rt = ({0,1,2} - {entries[0][0], entries[1][0]}).pop()
                 r, c = tile_rc_to_abs(missing_rt, ct, pos)
-                if out[r][c] == 1:  # untouched (inside tiles are 1)
+                if out[r][c] == 1:
                     out[r][c] = entries[0][1]
-
     return g, out
 
-def gen_cbded52d(n_train=20, n_test=5, seed: int = 2):
-    random.seed(seed)
-    train = [gen_cbded52d_single() for _ in range(n_train)]
-    test  = [gen_cbded52d_single() for _ in range(n_test)]
-    return train, test
-
 # -------------------- Task 4: d4a91cb9 --------------------
-# Rule: Exactly one 8 and one 2. Draw vertical from 8 to row of 2, then horizontal to 2's column, with 4s.
-
 def gen_d4a91cb9_single(h: int = 12, w: int = 13) -> Tuple[Grid, Grid]:
+    """Draw an L path of 4s from the 8 to the 2 (vertical then horizontal)."""
     g = zeros(h, w)
     r8, c8 = random.randint(0,h-1), random.randint(0,w-1)
     r2, c2 = r8, c8
@@ -315,32 +260,21 @@ def gen_d4a91cb9_single(h: int = 12, w: int = 13) -> Tuple[Grid, Grid]:
         r2, c2 = random.randint(0,h-1), random.randint(0,w-1)
     g[r8][c8] = 8
     g[r2][c2] = 2
-
     out = deepcopy(g)
-    # vertical leg
     step = 1 if r2 > r8 else -1
     for r in range(r8 + step, r2 + step, step):
         if (r, c8) != (r2, c2):
             out[r][c8] = 4
-    # horizontal leg
     step = 1 if c2 > c8 else -1
     for c in range(c8 + step, c2 + step, step):
         if (r2, c) != (r2, c2):
             out[r2][c] = 4
     return g, out
 
-def gen_d4a91cb9(n_train=20, n_test=5, h: int = 12, w: int = 13, seed: int = 3):
-    random.seed(seed)
-    train = [gen_d4a91cb9_single(h, w) for _ in range(n_train)]
-    test  = [gen_d4a91cb9_single(h, w) for _ in range(n_test)]
-    return train, test
-
 # -------------------- Task 5: d6ad076f --------------------
-# Rule: Bridge two solid rectangles (colors != 0,8) across their gap with an 8-rectangle:
-#       gap size g along separation axis × min(o, g) along orthogonal axis (anchored to band start).
-
 @dataclass
 class Rect:
+    """Axis-aligned rectangle with top-left, size and color."""
     top: int
     left: int
     height: int
@@ -348,11 +282,10 @@ class Rect:
     color: int
 
 def rect_bounds_interiors(rect: Rect):
-    """
-    returns: (r0, r1, c0, c1, ri0, ri1, ci0, ci1)
-    where (r0..r1, c0..c1) are full rect bounds inclusive,
-    and (ri0..ri1, ci0..ci1) are *interior* bounds exclusive of outer border.
-    Interior ranges may be empty (ri0 > ri1 or ci0 > ci1) for thin rectangles.
+    """Return outer and interior bounds for a rectangle.
+
+    Returns (r0, r1, c0, c1, ri0, ri1, ci0, ci1) where r/c are inclusive indices
+    and interior indices exclude the 1-cell border.
     """
     r0, r1 = rect.top, rect.top + rect.height - 1
     c0, c1 = rect.left, rect.left + rect.width - 1
@@ -367,11 +300,10 @@ def rect_bounds_interiors(rect: Rect):
     return (r0, r1, c0, c1, ri0, ri1, ci0, ci1)
 
 def gen_two_rects_gap(h: int, w: int) -> Tuple[Grid, Rect, Rect, str]:
-    """
-    Create two non-overlapping rectangles (height,width >=3) either stacked (vertical separation)
-    with horizontal interior overlap, or side-by-side (horizontal separation) with vertical interior overlap.
-    Returns (grid, rectA, rectB, mode) where mode in {"stacked","side"}.
-    Robust against infeasible samplings.
+    """Place two non-overlapping rectangles with a strict zero gap between them.
+
+    Returns grid with rectangles drawn, the two Rects, and mode: 'stacked' or 'side'.
+    The rectangles' interior overlaps along the orthogonal axis must be non-empty.
     """
     g = zeros(h, w)
     colors = [c for c in range(1,10) if c != 8]
@@ -381,9 +313,7 @@ def gen_two_rects_gap(h: int, w: int) -> Tuple[Grid, Rect, Rect, str]:
         wa = random.randint(3, max(3, w//2))
         hb = random.randint(3, max(3, h//2))
         wb = random.randint(3, max(3, w//2))
-
         if mode == "stacked":
-            # ensure room for a positive vertical gap
             max_topA = h - ha - hb - 1
             if max_topA < 0:
                 continue
@@ -397,7 +327,6 @@ def gen_two_rects_gap(h: int, w: int) -> Tuple[Grid, Rect, Rect, str]:
             leftB = random.randint(0, w - wb)
             rectA = Rect(topA, leftA, ha, wa, random.choice(colors))
             rectB = Rect(topB, leftB, hb, wb, random.choice([c for c in colors if c != rectA.color]))
-            # horizontal interior overlap + positive gap
             _, _, _, _, _, _, ci0A, ci1A = rect_bounds_interiors(rectA)
             _, _, _, _, _, _, ci0B, ci1B = rect_bounds_interiors(rectB)
             ci0 = max(ci0A, ci0B)
@@ -407,9 +336,7 @@ def gen_two_rects_gap(h: int, w: int) -> Tuple[Grid, Rect, Rect, str]:
                 draw_rect(g, rectA.top, rectA.left, rectA.height, rectA.width, rectA.color)
                 draw_rect(g, rectB.top, rectB.left, rectB.height, rectB.width, rectB.color)
                 return g, rectA, rectB, mode
-
-        else:  # side-by-side
-            # ensure room for a positive horizontal gap
+        else:
             max_leftA = w - wa - wb - 1
             if max_leftA < 0:
                 continue
@@ -423,7 +350,6 @@ def gen_two_rects_gap(h: int, w: int) -> Tuple[Grid, Rect, Rect, str]:
             topB = random.randint(0, h - hb)
             rectA = Rect(topA, leftA, ha, wa, random.choice(colors))
             rectB = Rect(topB, leftB, hb, wb, random.choice([c for c in colors if c != rectA.color]))
-            # vertical interior overlap + positive gap
             _, _, _, _, ri0A, ri1A, _, _ = rect_bounds_interiors(rectA)
             _, _, _, _, ri0B, ri1B, _, _ = rect_bounds_interiors(rectB)
             ri0 = max(ri0A, ri0B)
@@ -433,89 +359,224 @@ def gen_two_rects_gap(h: int, w: int) -> Tuple[Grid, Rect, Rect, str]:
                 draw_rect(g, rectA.top, rectA.left, rectA.height, rectA.width, rectA.color)
                 draw_rect(g, rectB.top, rectB.left, rectB.height, rectB.width, rectB.color)
                 return g, rectA, rectB, mode
-
     raise RuntimeError("Failed to place two rectangles with desired relation (tried 1000 times).")
 
 def apply_bridge_eights(grid: Grid, rectA: Rect, rectB: Rect, mode: str) -> Grid:
+    """Bridge the gap between two rectangles with color-8 band across the overlap."""
     out = deepcopy(grid)
     if mode == "stacked":
-        # vertical gap between A (top) and B (bottom)
         top_rect = rectA if rectA.top < rectB.top else rectB
         bottom_rect = rectB if rectB.top > rectA.top else rectA
-        gap_top = top_rect.top + top_rect.height     # one row below top rect
-        gap_bottom = bottom_rect.top - 1             # one row above bottom rect
-        g = gap_bottom - gap_top + 1                 # gap height
-
+        gap_top = top_rect.top + top_rect.height
+        gap_bottom = bottom_rect.top - 1
+        ggap = gap_bottom - gap_top + 1
         _, _, _, _, _, _, ci0A, ci1A = rect_bounds_interiors(top_rect)
         _, _, _, _, _, _, ci0B, ci1B = rect_bounds_interiors(bottom_rect)
         ci0 = max(ci0A, ci0B)
         ci1 = min(ci1A, ci1B)
-
-        if ci0 <= ci1 and g >= 1:
-            # width is overlap - 2 for borders
-            width = max(ci1 - ci0 + 1, 1)
-            cols = list(range(ci0, ci0 + width))  # anchor at *left* of overlap band
-            for r in range(gap_top, gap_top + g):
+        if ci0 <= ci1 and ggap >= 1:
+            # width is always overlap - 2 (minus the borders)
+            width = ci1 - ci0 + 1
+            cols = list(range(ci0, ci0 + width))
+            for r in range(gap_top, gap_top + ggap):
                 for c in cols:
                     out[r][c] = 8
-
-    else:  # side-by-side
+    else:
         left_rect = rectA if rectA.left < rectB.left else rectB
         right_rect = rectB if rectB.left > rectA.left else rectA
         gap_left = left_rect.left + left_rect.width
         gap_right = right_rect.left - 1
-        g = gap_right - gap_left + 1                 # gap width
-
+        ggap = gap_right - gap_left + 1
         _, _, _, _, ri0A, ri1A, _, _ = rect_bounds_interiors(left_rect)
         _, _, _, _, ri0B, ri1B, _, _ = rect_bounds_interiors(right_rect)
         ri0 = max(ri0A, ri0B)
         ri1 = min(ri1A, ri1B)
-
-        if ri0 <= ri1 and g >= 1:
-            # height is overlap - 2 for borders
-            height = max(ri1 - ri0 + 1, 1)
-            rows = list(range(ri0, ri0 + height))   # anchor at *top* of overlap band
+        if ri0 <= ri1 and ggap >= 1:
+            # height is always overlap - 2 (minus the borders)
+            height = ri1 - ri0 + 1
+            rows = list(range(ri0, ri0 + height))
             for r in rows:
-                for c in range(gap_left, gap_left + g):
+                for c in range(gap_left, gap_left + ggap):
                     out[r][c] = 8
     return out
 
 def gen_d6ad076f_single(h: int = 10, w: int = 10) -> Tuple[Grid, Grid]:
+    """Bridge two solid rectangles with 8s across the gap per spec."""
     g, ra, rb, mode = gen_two_rects_gap(h, w)
     out = apply_bridge_eights(g, ra, rb, mode)
     return g, out
 
-def gen_d6ad076f(n_train=20, n_test=5, h: int = 10, w: int = 10, seed: int = 4):
-    random.seed(seed)
-    train = [gen_d6ad076f_single(h, w) for _ in range(n_train)]
-    test  = [gen_d6ad076f_single(h, w) for _ in range(n_test)]
-    return train, test
+# -------------------- Uniqueness machinery --------------------
+def serialize_grid(grid: Grid) -> bytes:
+    """Compactly serialize a grid to bytes for hashing."""
+    h = len(grid); w = len(grid[0]) if h else 0
+    b = bytearray()
+    b.append(h & 0xFF); b.append(w & 0xFF)
+    for row in grid:
+        b.extend(row)
+    return bytes(b)
 
-# -------------------- batch generate & save --------------------
+def pair_key(inp: Grid, out: Grid) -> str:
+    """Compute a stable 128-bit key for an (input, output) pair."""
+    m = hashlib.blake2b(digest_size=16)
+    m.update(serialize_grid(inp)); m.update(b'|'); m.update(serialize_grid(out))
+    return m.hexdigest()
+
+def generate_unique_pairs(gen_single_fn, n_total: int,
+                          attempts_per_example: int = 50,
+                          progress: bool = True) -> Tuple[List[Tuple[Grid,Grid]], int, int]:
+    """
+    Try to generate n_total UNIQUE (input,output) pairs.
+    Returns (pairs, unique_count, attempts) where len(pairs)==unique_count.
+    Stops early if attempts exceed n_total*attempts_per_example.
+    """
+    keys = set()
+    pairs: List[Tuple[Grid,Grid]] = []
+    max_attempts = max(1, n_total * attempts_per_example)
+    attempts = 0
+
+    def _pbar(iterable):
+        if progress and tqdm is not None:
+            return tqdm(iterable, total=max_attempts, desc="Generating", leave=False)
+        return iterable
+
+    for _ in _pbar(range(max_attempts)):
+        attempts += 1
+        try:
+            inp, out = gen_single_fn()
+        except Exception:
+            continue
+        k = pair_key(inp, out)
+        if k not in keys:
+            keys.add(k)
+            pairs.append((inp, out))
+            if len(pairs) >= n_total:
+                break
+    return pairs, len(pairs), attempts
+
+def make_unique_train_test(gen_single_fn,
+                           n_train: int,
+                           n_test: int,
+                           attempts_per_example: int = 50,
+                           strict: bool = True,
+                           progress: bool = True) -> Tuple[List[Tuple[Grid,Grid]], List[Tuple[Grid,Grid]], Dict[str,int], bool]:
+    """
+    Generate UNIQUE (train+test) pairs, then split so train and test are disjoint.
+    If strict and not enough unique are found, returns partial=False and stats.
+    If not strict, returns as many as possible (train filled first), partial=True.
+    """
+    need = n_train + n_test
+    pairs, unique_count, attempts = generate_unique_pairs(gen_single_fn, need, attempts_per_example, progress)
+    stats = {
+        "requested_total": need,
+        "unique_generated": unique_count,
+        "attempts": attempts,
+        "duplicates_avoided": attempts - unique_count
+    }
+    if unique_count < need and strict:
+        return [], [], stats, False
+    train = pairs[:min(n_train, unique_count)]
+    test = pairs[min(n_train, unique_count):min(need, unique_count)]
+    return train, test, stats, (unique_count >= need)
+
+# -------------------- Task registry & CLI --------------------
+TASKS = {
+    "bb43febb": lambda: gen_bb43febb_single(10,10), #(height, width)
+    "c9f8e694": lambda: gen_c9f8e694_single(10,10), #(height, width)
+    "cbded52d": lambda: gen_cbded52d_single(),
+    "d4a91cb9": lambda: gen_d4a91cb9_single(10,10), #(height, width)
+    "d6ad076f": lambda: gen_d6ad076f_single(10,10), #(height, width)
+}
 
 def main():
-    # You can tweak these defaults.
-    SEED = 2025
-    tasks = {
-        "bb43febb": (gen_bb43febb, {"n_train": 30, "n_test": 10, "h": 10, "w": 10, "seed": SEED}),
-        "c9f8e694": (gen_c9f8e694, {"n_train": 30, "n_test": 10, "h": 10, "w": 10, "seed": SEED+1}),
-        "cbded52d": (gen_cbded52d, {"n_train": 30, "n_test": 10, "seed": SEED+2}),
-        "d4a91cb9": (gen_d4a91cb9, {"n_train": 30, "n_test": 10, "h": 10, "w": 10, "seed": SEED+3}),
-        "d6ad076f": (gen_d6ad076f, {"n_train": 30, "n_test": 10, "h": 10, "w": 10, "seed": SEED+4}),
-    }
+    """CLI entry point for generating/validating ARC synthetic datasets."""
+    import argparse
+    p = argparse.ArgumentParser(description="ARC synthetic generators with strict dedup & disjoint splits")
+    sub = p.add_subparsers(dest="cmd", required=True)
 
-    base_dir = "arc_synth"
-    os.makedirs(base_dir, exist_ok=True)
-    written = []
-    for tid, (fn, kwargs) in tasks.items():
-        train_pairs, test_pairs = fn(**kwargs)
-        path = os.path.join(base_dir, f"synth_{tid}.json")
-        save_task_json(path, train_pairs, test_pairs)
-        written.append(path)
+    pm = sub.add_parser("make", help="Create a single task JSON with uniqueness constraints")
+    pm.add_argument("--task", required=True, choices=list(TASKS.keys()))
+    pm.add_argument("--n_train", type=int, default=30)
+    pm.add_argument("--n_test", type=int, default=10)
+    pm.add_argument("--seed", type=int, default=0)
+    pm.add_argument("--attempts_per_example", type=int, default=50, help="How many tries per desired unique example before giving up")
+    pm.add_argument("--out", type=str, required=True)
+    pm.add_argument("--allow_partial", action="store_true", help="Write partial dataset if not enough unique samples are found")
+    pm.add_argument("--no_progress", action="store_true")
 
-    print("Wrote JSON files:")
-    for p in written:
-        print(" -", p)
+    pa = sub.add_parser("make_all", help="Create all registered tasks (use defaults per task)")
+    pa.add_argument("--n_train", type=int, default=30)
+    pa.add_argument("--n_test", type=int, default=10)
+    pa.add_argument("--seed", type=int, default=0)
+    pa.add_argument("--attempts_per_example", type=int, default=50)
+    pa.add_argument("--out_dir", type=str, default="arc_synth_unique")
+    pa.add_argument("--allow_partial", action="store_true")
+    pa.add_argument("--no_progress", action="store_true")
+
+    pv = sub.add_parser("verify", help="Verify dataset JSON has unique train and disjoint test")
+    pv.add_argument("json", type=str)
+
+    args = p.parse_args()
+    random.seed(args.seed)
+
+    if args.cmd == "make":
+        gen_single = TASKS[args.task]
+        train, test, stats, complete = make_unique_train_test(
+            gen_single, args.n_train, args.n_test,
+            attempts_per_example=args.attempts_per_example,
+            strict=not args.allow_partial,
+            progress=not args.no_progress
+        )
+        print(f"[{args.task}] requested {stats['requested_total']} → unique {stats['unique_generated']} (attempts {stats['attempts']}, duplicates {stats['duplicates_avoided']})")
+        if not complete and not args.allow_partial:
+            print("Not enough unique samples; stopping without writing.")
+            raise SystemExit(1)
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        save_task_json(args.out, train, test)
+        print("Wrote:", args.out)
+        print(f"  train={len(train)}, test={len(test)}")
+
+    elif args.cmd == "make_all":
+        os.makedirs(args.out_dir, exist_ok=True)
+        for task, gen_single in TASKS.items():
+            random.seed(args.seed)  # per-task determinism by seed
+            out_path = os.path.join(args.out_dir, f"synth_{task}.json")
+            train, test, stats, complete = make_unique_train_test(
+                gen_single, args.n_train, args.n_test,
+                attempts_per_example=args.attempts_per_example,
+                strict=not args.allow_partial,
+                progress=not args.no_progress
+            )
+            print(f"[{task}] requested {stats['requested_total']} → unique {stats['unique_generated']} (attempts {stats['attempts']}, duplicates {stats['duplicates_avoided']})")
+            if not complete and not args.allow_partial:
+                print(f"[{task}] Not enough unique; aborting without writing.")
+                raise SystemExit(1)
+            save_task_json(out_path, train, test)
+            print("Wrote:", out_path, f"(train={len(train)}, test={len(test)})")
+
+    elif args.cmd == "verify":
+        with open(args.json, "r") as f:
+            data = json.load(f)
+        seen = set()
+        dup = 0
+        for ex in data.get("train", []):
+            k = pair_key(ex["input"], ex["output"])
+            if k in seen:
+                dup += 1
+            seen.add(k)
+        if dup:
+            print(f"Train duplicates: {dup}")
+        else:
+            print("Train set: all unique")
+        clash = 0
+        for ex in data.get("test", []):
+            k = pair_key(ex["input"], ex["output"])
+            if k in seen:
+                clash += 1
+        if clash:
+            print(f"Test contains {clash} pairs that also exist in train!")
+        else:
+            print("Train/Test are disjoint (exact pair level)")
 
 if __name__ == "__main__":
     main()

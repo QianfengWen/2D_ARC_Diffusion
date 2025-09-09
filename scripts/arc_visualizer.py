@@ -11,7 +11,6 @@ Dependencies: matplotlib (no numpy or pillow required)
 """
 
 from __future__ import annotations
-from calendar import SEPTEMBER
 import json
 import os
 from readline import set_pre_input_hook
@@ -134,8 +133,8 @@ def _load_arc_json(path: str) -> Dict[str, List[Dict[str, Grid]]]:
     with open(path, "r") as f:
         data = json.load(f)
     # Basic validation
-    if not isinstance(data, dict) or "train" not in data or "test" not in data:
-        raise ValueError("File does not look like ARC-AGI JSON (missing 'train'/'test').")
+    if not isinstance(data, dict):
+        raise ValueError("File does not look like ARC-AGI JSON (must be an object).")
     return data
 
 def visualize_task_json(path: str,
@@ -252,6 +251,57 @@ def save_pair_png(inp: Grid,
     plt.savefig(filename, dpi=dpi, bbox_inches="tight", pad_inches=0)
     plt.close(fig)
 
+def save_triplet_png(inp: Grid,
+                     pred: Grid,
+                     gt: Optional[Grid],
+                     filename: str,
+                     palette: Dict[int, str] = DEFAULT_PALETTE,
+                     cell_size: int = 32,
+                     pad_cells: int = 1,
+                     dpi: int = 100):
+    """
+    Save a triplet image: input | pred | gt (if provided). If gt exists, draw diff boxes on pred vs gt.
+    """
+    h = len(inp)
+    w_in = len(inp[0]) if h else 0
+    w_pred = len(pred[0]) if len(pred) else 0
+    w_gt = len(gt[0]) if (gt is not None and len(gt)) else 0
+    cols = 3 if gt is not None else 2
+
+    total_w_cells = w_in + pad_cells + w_pred + (pad_cells + w_gt if gt is not None else 0)
+    px_w = total_w_cells * cell_size
+    px_h = max(len(inp), len(pred), len(gt) if gt is not None else 0) * cell_size
+    fig_w = px_w / dpi
+    fig_h = max(1, px_h) / dpi
+
+    fig = plt.figure(figsize=(fig_w, fig_h), dpi=dpi)
+    # input
+    acc_w = 0.0
+    frac_in = w_in / total_w_cells if total_w_cells else 1.0
+    ax_in = fig.add_axes([acc_w, 0, frac_in, 1])
+    draw_grid(inp, ax=ax_in, palette=palette, show_grid=False)
+    acc_w += frac_in
+    # pred spacer + pred
+    if pad_cells:
+        acc_w += pad_cells / total_w_cells
+    frac_pred = w_pred / total_w_cells if total_w_cells else 0.0
+    ax_pred = fig.add_axes([acc_w, 0, frac_pred, 1])
+    draw_grid(pred, ax=ax_pred, palette=palette, show_grid=False)
+    # diff boxes use gt if available
+    if gt is not None:
+        _draw_diff_boxes(ax_pred, gt, pred)
+    acc_w += frac_pred
+    # gt
+    if gt is not None:
+        if pad_cells:
+            acc_w += pad_cells / total_w_cells
+        frac_gt = w_gt / total_w_cells if total_w_cells else 0.0
+        ax_gt = fig.add_axes([acc_w, 0, frac_gt, 1])
+        draw_grid(gt, ax=ax_gt, palette=palette, show_grid=False)
+
+    plt.savefig(filename, dpi=dpi, bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
+
 def save_dataset_images(json_path: str,
                         out_dir: str,
                         split: str = "train",
@@ -286,6 +336,38 @@ def save_dataset_images(json_path: str,
         # save_grid_png(out, os.path.join(out_dir, base + "_output.png"),
         #               palette=palette, cell_size=cell_size, grid_lines=False, dpi=dpi)
 
+
+def show_episode(context, query_in, query_out=None, pred_out=None, palette=DEFAULT_PALETTE):
+    """
+    context: list of 3 dicts [{"input": grid, "output": grid}, ...]
+    query_in: grid
+    query_out: optional ground-truth grid (to show aside pred)
+    pred_out: optional predicted grid
+    Layout:
+      Row 1-3: each context pair (input|output)
+      Row 4  : query input | (pred) | (gt if provided)
+    """
+    rows = 3 + 1
+    cols = 2 if (pred_out is None and query_out is None) else (3 if (pred_out is None or query_out is None) else 4)
+    fig, axes = plt.subplots(rows, cols, figsize=(cols*3.2, rows*2.8))
+    if rows == 1: axes = [axes]
+    # context rows
+    for i in range(3):
+        cin = context[i]["input"]; cout = context[i]["output"]
+        draw_grid(cin, f"ctx{i+1} in", ax=axes[i][0], palette=palette)
+        draw_grid(cout, f"ctx{i+1} out", ax=axes[i][1], palette=palette)
+    # query row
+    draw_grid(query_in, "query in", ax=axes[3][0], palette=palette)
+    c = 1
+    if pred_out is not None:
+        draw_grid(pred_out, "pred", ax=axes[3][c], palette=palette)
+        if query_out is not None: _draw_diff_boxes(axes[3][c], query_out, pred_out)
+        c += 1
+    if query_out is not None:
+        draw_grid(query_out, "gt", ax=axes[3][c], palette=palette)
+    fig.tight_layout()
+    return fig
+
 # -------------------- CLI --------------------
 
 def _cli():
@@ -312,6 +394,23 @@ def _cli():
     p_save.add_argument("--cell", type=int, default=32, help="Cell size in pixels")
     p_save.add_argument("--dpi", type=int, default=100)
 
+    # Offline predictions: {"test_episodes_outputs": [{"query_input":..., "pred_output":..., "query_gt":...}, ...]}
+    p_save_off = sub.add_parser("save_offline", help="Export PNGs from offline predictions JSON (test_episodes_outputs)")
+    p_save_off.add_argument("json", help="Path to predictions JSON")
+    p_save_off.add_argument("--out", required=True, help="Output directory")
+    p_save_off.add_argument("--prefix", type=str, default=None, help="Prefix for file names")
+    p_save_off.add_argument("--cell", type=int, default=32, help="Cell size in pixels")
+    p_save_off.add_argument("--dpi", type=int, default=100)
+    p_save_off.add_argument("--max", type=int, default=None, help="Max episodes to export")
+
+    # Shard visualizer: episodes_3shot_gXX/train_0000.pt style
+    p_save_shard = sub.add_parser("save_shard", help="Export PNGs from an episodic shard .pt file (ctx+query gt)")
+    p_save_shard.add_argument("shard", help="Path to shard .pt (contains ctx_in, ctx_out, q_in, q_out_idx)")
+    p_save_shard.add_argument("--out", required=True, help="Output directory")
+    p_save_shard.add_argument("--prefix", type=str, default=None, help="Prefix for file names")
+    p_save_shard.add_argument("--max", type=int, default=None, help="Max episodes to export")
+    p_save_shard.add_argument("--offset", type=int, default=0, help="Start index within the shard")
+
     args = p.parse_args()
 
     if args.cmd == "show":
@@ -325,6 +424,52 @@ def _cli():
                             prefix=args.prefix, side_by_side=args.pair,
                             cell_size=args.cell, dpi=args.dpi)
         print(f"Saved PNGs to: {args.out}")
+
+    elif args.cmd == "save_offline":
+        with open(args.json, "r") as f:
+            data = json.load(f)
+        items = data.get("test_episodes_outputs", [])
+        if args.prefix is None:
+            prefix = os.path.splitext(os.path.basename(args.json))[0]
+        else:
+            prefix = args.prefix
+        os.makedirs(args.out, exist_ok=True)
+        if args.max is not None:
+            items = items[:args.max]
+        for i, ex in enumerate(items):
+            q_in = ex["query_input"]
+            pred = ex.get("pred_output")
+            gt = ex.get("query_gt")
+            base = f"{prefix}_test_{i:03d}"
+            save_triplet_png(q_in, pred, gt, os.path.join(args.out, base + "_triplet.png"),
+                             cell_size=args.cell, dpi=args.dpi)
+        print(f"Saved offline prediction PNGs to: {args.out}")
+
+    elif args.cmd == "save_shard":
+        import torch
+        t = torch.load(args.shard, map_location="cpu")
+        N = t["q_in"].shape[0]
+        start = max(0, int(args.offset))
+        end = N if args.max is None else min(N, start + int(args.max))
+        os.makedirs(args.out, exist_ok=True)
+        prefix = args.prefix or os.path.splitext(os.path.basename(args.shard))[0]
+
+        def oh_to_idx(grid_oh):
+            return grid_oh.argmax(dim=0).tolist()
+
+        for i in range(start, end):
+            ctx = []
+            for k in range(3):
+                cin = oh_to_idx(t["ctx_in"][i, k])
+                cout = oh_to_idx(t["ctx_out"][i, k])
+                ctx.append({"input": cin, "output": cout})
+            q_in = oh_to_idx(t["q_in"][i])
+            q_gt = t["q_out_idx"][i].tolist()
+            fig = show_episode(ctx, q_in, query_out=q_gt, pred_out=None)
+            base = f"{prefix}_{i:05d}"
+            fig.savefig(os.path.join(args.out, base + "_episode.png"), dpi=120, bbox_inches="tight", pad_inches=0)
+            plt.close(fig)
+        print(f"Saved shard episode PNGs to: {args.out}")
 
 if __name__ == "__main__":
     _cli()
