@@ -1,0 +1,8 @@
+# Core dependencies for 2D_ARC_Diffusion
+# For GPU builds of PyTorch, install torch/torchvision from the appropriate CUDA wheel index.
+torch
+torchvision
+tqdm
+matplotlib
+PyYAML
+

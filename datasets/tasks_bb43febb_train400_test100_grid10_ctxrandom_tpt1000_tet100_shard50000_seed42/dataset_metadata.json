@@ -1,0 +1,17 @@
+{
+  "dataset_id": "tasks_bb43febb_train400_test100_grid10_ctxrandom_tpt1000_tet100_shard50000_seed42",
+  "created_at": 1757454562.2965705,
+  "config": {
+    "tasks": [
+      "bb43febb"
+    ],
+    "n_train": 400,
+    "n_test": 100,
+    "seed": 42,
+    "grid_size": 10,
+    "ctx_policy": "random",
+    "train_per_task": 1000,
+    "test_per_task": 100,
+    "shard_size": 50000
+  }
+}

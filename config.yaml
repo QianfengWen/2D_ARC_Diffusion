@@ -1,0 +1,99 @@
+# Configuration for 2D_ARC_Diffusion
+# All options documented with comments showing available choices
+# 
+# DATASET MANAGEMENT: This config automatically generates systematic dataset names
+# based on all parameters below. Identical configs reuse existing datasets from
+# central storage (datasets/ folder), while each experiment gets its own copy.
+
+# Experiment metadata (name is CLI-only; not set here)
+experiment:
+  description: "Single task training" # Optional description; does not affect paths
+  
+# Model configuration
+model:
+  # UNet architecture - currently only flat_unet_3shot available
+  architecture: "flat_unet_3shot"
+  params:
+    model_ch: 128        # Base channel count for UNet
+    num_blocks: 6        # Number of residual blocks
+    t_dim: 256          # Time embedding dimension
+    ctx_dim: 256        # Context embedding dimension
+
+# Diffusion configuration  
+diffusion:
+  # Method - currently only ddpm available, future: [ddim, adaptive]
+  method: "ddpm"
+  params:
+    timesteps: 400      # Number of diffusion steps (typical: 400, 1000)
+    beta_start: 0.0001  # Noise schedule start (typical: 1e-4)
+    beta_end: 0.02      # Noise schedule end (typical: 2e-2, 5e-2)
+    schedule: "linear"   # [linear] - future: [cosine, sigmoid]
+
+# Data configuration
+data:
+  # Task generation settings
+  generation:
+    tasks: ["bb43febb"] # Which synthetic tasks to generate
+                        # Available: ["bb43febb", "c9f8e694", "cbded52d", "d4a91cb9", "d6ad076f"]
+    n_train: 400        # Training samples per task
+    n_test: 100         # Test samples per task
+    seed: 42            # Random seed for generation
+    attempts_per_example: 50 # How many attempts per unique example
+    
+  # Episode creation settings
+  episodes:
+    grid_size: 10       # Pad grids to this size (typical: 10, 16)
+    ctx_policy: "random" # Context selection: ["first3", "random", "sliding"]
+    train_per_task: 1000 # Episodes per task for training
+    test_per_task: 100 # Episodes per task for testing (FIXED: was 50, too small!)
+    shard_size: 50000   # Samples per shard file (larger = more memory, fewer files)
+    
+  # Data loading settings
+  loading:
+    batch_size: 32      # Training batch size
+    num_workers: 4      # DataLoader workers (0 to disable multiprocessing)
+    pin_memory: true    # Pin memory for GPU transfer
+    prefetch_factor: 2  # Prefetch factor for DataLoader
+
+# Training configuration
+training:
+  epochs: 50           # Number of training epochs
+  learning_rate: 0.0001 # Base learning rate (typical: 1e-4 to 5e-4)
+  optimizer: "adamw"    # ["adamw", "adam"] - future: ["sgd"]
+  
+  # Learning rate scheduling
+  scheduler:
+    type: "none"        # ["none", "cosine", "step", "plateau"]
+    # step_size: 50      # For step scheduler
+    # gamma: 0.5         # For step scheduler
+    
+  # Validation settings
+  val_frequency: 10      # Validate every N epochs
+  val_batches: 10       # Number of validation batches to run
+  
+  # Checkpointing settings
+  save_frequency: 10    # Save checkpoint every N epochs
+  save_top_k: 3         # Keep top K checkpoints by validation score
+  
+  # Monitoring settings
+  log_frequency: 100    # Log loss every N steps
+  plot_losses: true     # Enable real-time loss plotting
+  save_samples: false   # Save sample predictions during training
+
+# Path configuration (relative to project root)
+paths:
+  # Data/output paths are grouped by month/day (YYYY-MM/DD)
+  # Supported template variables: {experiment.name}, {time.month}, {time.date}, {time.day}
+  data_root: "experiments/{time.month}/{time.day}/{experiment.name}/data"
+  
+  # Output paths for this specific experiment
+  output_root: "experiments/{time.month}/{time.day}/{experiment.name}"
+  models_dir: "{output_root}/models"       # Checkpoints directory
+  logs_dir: "{output_root}/logs"           # Training logs & plots
+  results_dir: "{output_root}/results"     # Predictions & evaluation results
+  
+# Hardware/performance settings
+hardware:
+  device: "auto"        # ["auto", "cpu", "cuda", "mps"] 
+  mixed_precision: true # Enable automatic mixed precision training
+  compile_model: false  # Use torch.compile (experimental, requires PyTorch 2.0+)

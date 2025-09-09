@@ -1,0 +1,59 @@
+data:
+  episodes:
+    ctx_policy: random
+    grid_size: 10
+    shard_size: 50000
+    test_per_task: 100
+    train_per_task: 1000
+  generation:
+    attempts_per_example: 50
+    n_test: 100
+    n_train: 400
+    seed: 42
+    tasks:
+    - bb43febb
+  loading:
+    batch_size: 32
+    num_workers: 4
+    pin_memory: true
+    prefetch_factor: 2
+diffusion:
+  method: ddpm
+  params:
+    beta_end: 0.02
+    beta_start: 0.0001
+    schedule: linear
+    timesteps: 400
+experiment:
+  description: Single task training
+  name: 1_test
+hardware:
+  compile_model: false
+  device: auto
+  mixed_precision: true
+model:
+  architecture: flat_unet_3shot
+  params:
+    ctx_dim: 256
+    model_ch: 128
+    num_blocks: 6
+    t_dim: 256
+paths:
+  data_root: experiments/2025-09/09/1_test/data
+  logs_dir: experiments/2025-09/09/1_test/logs
+  models_dir: experiments/2025-09/09/1_test/models
+  output_root: experiments/2025-09/09/1_test
+  results_dir: experiments/2025-09/09/1_test/results
+training:
+  epochs: 50
+  learning_rate: 0.0001
+  log_frequency: 100
+  optimizer: adamw
+  plot_losses: true
+  save_frequency: 10
+  save_samples: false
+  save_top_k: 3
+  scheduler:
+    type: none
+  val_batches: 10
+  val_frequency: 10
