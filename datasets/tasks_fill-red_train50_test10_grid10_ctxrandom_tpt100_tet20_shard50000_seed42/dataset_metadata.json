@@ -1,0 +1,23 @@
+{
+  "dataset_id": "tasks_fill-red_train50_test10_grid10_ctxrandom_tpt100_tet20_shard50000_seed42",
+  "created_at": 1758667330.086305,
+  "config": {
+    "tasks_codes": [
+      "bb43febb"
+    ],
+    "tasks_names": [
+      "fill red"
+    ],
+    "tasks_slugs": [
+      "fill-red"
+    ],
+    "n_train": 50,
+    "n_test": 10,
+    "seed": 42,
+    "grid_size": 10,
+    "ctx_policy": "random",
+    "train_per_task": 100,
+    "test_per_task": 20,
+    "shard_size": 50000
+  }
+}

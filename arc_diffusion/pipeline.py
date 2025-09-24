@@ -12,6 +12,7 @@ from .models import MODEL_REGISTRY, DIFFUSION_REGISTRY, DiffusionCfg
 from .data.dataset import EpisodesPTDataset
 from .training.trainer import DiffusionTrainer
 from .utils.io import setup_directories, ensure_dataset_exists
+from .utils.visualization import save_episode_ctx_pred, save_collage_ctx_pred
 
 
 class ARCDiffusionPipeline:
@@ -72,7 +73,12 @@ class ARCDiffusionPipeline:
         """Create model and diffusion process."""
         # Get model class
         model_class = MODEL_REGISTRY[self.config.model.architecture]
-        model = model_class(**self.config.model.params).to(self.device)
+        
+        # Add parameterization to model params
+        model_params = self.config.model.params.copy()
+        model_params["parameterization"] = self.config.diffusion.parameterization
+        
+        model = model_class(**model_params).to(self.device)
         
         # Get diffusion process
         diffusion_class = DIFFUSION_REGISTRY[self.config.diffusion.method]
@@ -81,6 +87,8 @@ class ARCDiffusionPipeline:
             "timesteps": self.config.diffusion.params.get("timesteps", 400),
             "beta_start": self.config.diffusion.params.get("beta_start", 1e-4),
             "beta_end": self.config.diffusion.params.get("beta_end", 2e-2),
+            "parameterization": self.config.diffusion.parameterization,
+            "mode": self.config.diffusion.mode,
         }
         diffusion_cfg = DiffusionCfg(**supported_params)
         diffusion = diffusion_class(diffusion_cfg, self.device)
@@ -91,7 +99,8 @@ class ARCDiffusionPipeline:
         """Create training and validation data loaders."""
         # Create datasets
         train_dataset = EpisodesPTDataset(episodes_dir, split="train")
-        val_dataset = EpisodesPTDataset(episodes_dir, split="test")
+        # For validation, include task ids so we can compute per-task metrics
+        val_dataset = EpisodesPTDataset(episodes_dir, split="test", return_tid=True)
         
         # DataLoader kwargs
         dl_kwargs = {
@@ -189,13 +198,22 @@ class ARCDiffusionPipeline:
         model.eval()
         
         # Create test loader
-        test_dataset = EpisodesPTDataset(episodes_dir, split="test")
+        test_dataset = EpisodesPTDataset(episodes_dir, split="test", return_tid=True)
         test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=0)
         
         # Generate predictions
         predictions = []
+        vis_dir = os.path.join(self.config.paths.results_dir, "test_vis")
+        os.makedirs(vis_dir, exist_ok=True)
+        # Accumulate per task id for collages
+        per_task_samples = {}
         with torch.no_grad():
-            for ctx_in, ctx_out, q_in, q_out_oh, q_out_idx in tqdm(test_loader, desc="Predicting"):
+            for batch in tqdm(test_loader, desc="Predicting"):
+                if len(batch) == 6:
+                    ctx_in, ctx_out, q_in, q_out_oh, q_out_idx, q_tid = batch
+                else:
+                    ctx_in, ctx_out, q_in, q_out_oh, q_out_idx = batch
+                    q_tid = None
                 ctx_in = ctx_in.to(self.device)
                 ctx_out = ctx_out.to(self.device)
                 q_in = q_in.to(self.device)
@@ -209,6 +227,67 @@ class ARCDiffusionPipeline:
                     "pred_output": pred,
                     "query_gt": q_out_idx[0].cpu().tolist()
                 })
+                # Accumulate per-task for collage
+                try:
+                    tid_int = int(q_tid[0].item()) if q_tid is not None else -1
+                except Exception:
+                    tid_int = -1
+                bucket = per_task_samples.setdefault(tid_int, [])
+                if len(bucket) < getattr(self.config.visualization, "test_samples_per_task", None) or len(bucket) < self.config.visualization.test_samples:
+                    bucket.append((
+                        ctx_in[0].cpu(), ctx_out[0].cpu(), q_in[0].cpu(), x0.argmax(dim=1)[0].cpu()
+                    ))
+
+        # Save per-task collages for test predictions
+        # Try to load task slugs to name files
+        task_slugs = None
+        try:
+            with open(os.path.join(test_dataset.base_dir, "meta.json"), "r") as f:
+                meta = json.load(f)
+                task_slugs = meta.get("task_slugs")
+        except Exception:
+            pass
+        merged_collage_paths = []
+        merged_titles = []
+        for tid, samples in per_task_samples.items():
+            if not samples:
+                continue
+            try:
+                # Stack into batch tensors
+                n = min(len(samples), getattr(self.config.visualization, "test_samples_per_task", None) or self.config.visualization.test_samples)
+                ctx_in_b = torch.stack([s[0] for s in samples[:n]], dim=0)  # (B,K,10,S,S)
+                ctx_out_b = torch.stack([s[1] for s in samples[:n]], dim=0)
+                q_in_b = torch.stack([s[2] for s in samples[:n]], dim=0)
+                pred_b = torch.stack([s[3] for s in samples[:n]], dim=0)    # (B,S,S)
+                if task_slugs and tid >= 0 and tid < len(task_slugs):
+                    slug = task_slugs[tid]
+                else:
+                    slug = f"tid{tid:02d}" if tid >= 0 else "unknown"
+                out_path = os.path.join(vis_dir, f"collage_{slug}.png")
+                save_collage_ctx_pred(
+                    ctx_in_batch=ctx_in_b,
+                    ctx_out_batch=ctx_out_b,
+                    q_in_batch=q_in_b,
+                    pred_idx_batch=pred_b,
+                    path=out_path,
+                    max_samples=n,
+                    cols=self.config.visualization.collage_cols,
+                    include_query=self.config.visualization.include_query,
+                    dpi=self.config.visualization.save_dpi,
+                    mode=diffusion.mode,
+                )
+                merged_collage_paths.append(out_path)
+                merged_titles.append(slug)
+            except Exception as vis_e:
+                print(f"(warn) saving test collage for task {tid} failed: {vis_e}")
+
+        # Merge per-task collages into one image if multiple tasks
+        try:
+            if len(merged_collage_paths) > 1:
+                from .utils.visualization import merge_pngs_grid
+                merge_pngs_grid(merged_collage_paths, os.path.join(vis_dir, "collage_all_tasks.png"), cols=self.config.visualization.collage_cols, titles=merged_titles, dpi=self.config.visualization.save_dpi)
+        except Exception as e:
+            print(f"(warn) merging test collages failed: {e}")
         
         # Save predictions
         out_path = os.path.join(self.config.paths.results_dir, "predictions.json")

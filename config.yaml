@@ -7,7 +7,7 @@
 
 # Experiment metadata (name is CLI-only; not set here)
 experiment:
-  description: "Single task training" # Optional description; does not affect paths
+  description: "" # Optional description; does not affect paths
   
 # Model configuration
 model:
@@ -23,6 +23,10 @@ model:
 diffusion:
   # Method - currently only ddpm available, future: [ddim, adaptive]
   method: "ddpm"
+  # Parameterization mode - affects loss function and model output
+  parameterization: "predict_x0"  # ["predict_noise", "predict_x0", "predict_v"]
+  # Mode - affects specialized loss functions (occupancy/color require predict_x0)
+  mode: "baseline"  # ["baseline", "occupancy", "color"]
   params:
     timesteps: 400      # Number of diffusion steps (typical: 400, 1000)
     beta_start: 0.0001  # Noise schedule start (typical: 1e-4)
@@ -33,10 +37,15 @@ diffusion:
 data:
   # Task generation settings
   generation:
-    tasks: ["bb43febb"] # Which synthetic tasks to generate
-                        # Available: ["bb43febb", "c9f8e694", "cbded52d", "d4a91cb9", "d6ad076f"]
-    n_train: 400        # Training samples per task
-    n_test: 100         # Test samples per task
+    # Select tasks by friendly names (see arc_diffusion/data/task_names.py)
+    tasks: ["L corner fill", "two-tone frame", "color plus"]
+                        #["fill red", "color row", "two of three", "L path", "narrow connect"]
+                        # occ-color subset
+                        #["L corner fill", "two-tone frame", "color plus"]
+                        # You can also use slug forms: ["fill-red", ...]
+                        # Or raw codes for custom tasks: ["bb43febb", ...]
+    n_train: 500        # Training samples per task
+    n_test: 200         # Test samples per task
     seed: 42            # Random seed for generation
     attempts_per_example: 50 # How many attempts per unique example
     
@@ -44,21 +53,21 @@ data:
   episodes:
     grid_size: 10       # Pad grids to this size (typical: 10, 16)
     ctx_policy: "random" # Context selection: ["first3", "random", "sliding"]
-    train_per_task: 1000 # Episodes per task for training
+    train_per_task: 400 # Episodes per task for training
     test_per_task: 100 # Episodes per task for testing (FIXED: was 50, too small!)
     shard_size: 50000   # Samples per shard file (larger = more memory, fewer files)
     
   # Data loading settings
   loading:
-    batch_size: 32      # Training batch size
+    batch_size: 64      # Training batch size
     num_workers: 4      # DataLoader workers (0 to disable multiprocessing)
     pin_memory: true    # Pin memory for GPU transfer
     prefetch_factor: 2  # Prefetch factor for DataLoader
 
 # Training configuration
 training:
-  epochs: 50           # Number of training epochs
-  learning_rate: 0.0001 # Base learning rate (typical: 1e-4 to 5e-4)
+  epochs: 200           # Number of training epochs
+  learning_rate: 0.001 # Base learning rate (typical: 1e-4 to 5e-4)
   optimizer: "adamw"    # ["adamw", "adam"] - future: ["sgd"]
   
   # Learning rate scheduling
@@ -68,17 +77,28 @@ training:
     # gamma: 0.5         # For step scheduler
     
   # Validation settings
-  val_frequency: 10      # Validate every N epochs
+  val_frequency: 20      # Validate every N epochs
   val_batches: 10       # Number of validation batches to run
   
   # Checkpointing settings
-  save_frequency: 10    # Save checkpoint every N epochs
-  save_top_k: 3         # Keep top K checkpoints by validation score
+  save_frequency: 20    # Save checkpoint every N epochs
+  save_top_k: 1         # Keep top K checkpoints by validation score
   
   # Monitoring settings
   log_frequency: 100    # Log loss every N steps
   plot_losses: true     # Enable real-time loss plotting
   save_samples: false   # Save sample predictions during training
+
+# Visualization configuration
+visualization:
+  # Per-task visualization settings
+  val_samples_per_task: 3   # Samples per task during validation
+  test_samples_per_task: 6  # Samples per task during predict/test
+  group_by_task: true       # Save one collage per task
+  max_vis_scan: 2000        # Max samples to scan to gather per-task examples
+  collage_cols: 3       # Number of sample blocks per row in collage
+  include_query: true   # Include the query input tile next to prediction
+  save_dpi: 150         # DPI for saved PNGs
 
 # Path configuration (relative to project root)
 paths:

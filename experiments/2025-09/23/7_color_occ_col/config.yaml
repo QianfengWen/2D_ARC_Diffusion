@@ -1,0 +1,73 @@
+data:
+  episodes:
+    ctx_policy: random
+    grid_size: 10
+    shard_size: 50000
+    test_per_task: 100
+    train_per_task: 1000
+  generation:
+    attempts_per_example: 50
+    n_test: 100
+    n_train: 400
+    seed: 42
+    tasks:
+    - L corner fill
+    - two-tone frame
+    - color plus
+  loading:
+    batch_size: 128
+    num_workers: 4
+    pin_memory: true
+    prefetch_factor: 2
+diffusion:
+  method: ddpm
+  mode: color
+  parameterization: predict_x0
+  params:
+    beta_end: 0.02
+    beta_start: 0.0001
+    schedule: linear
+    timesteps: 400
+experiment:
+  description: ''
+  name: 7_color_occ_col
+hardware:
+  compile_model: false
+  device: auto
+  mixed_precision: true
+model:
+  architecture: flat_unet_3shot
+  params:
+    ctx_dim: 256
+    model_ch: 128
+    num_blocks: 6
+    t_dim: 256
+paths:
+  data_root: experiments/2025-09/23/7_color_occ_col/data
+  logs_dir: experiments/2025-09/23/7_color_occ_col/logs
+  models_dir: experiments/2025-09/23/7_color_occ_col/models
+  output_root: experiments/2025-09/23/7_color_occ_col
+  results_dir: experiments/2025-09/23/7_color_occ_col/results
+training:
+  epochs: 400
+  learning_rate: 0.0001
+  log_frequency: 100
+  optimizer: adamw
+  plot_losses: true
+  save_frequency: 20
+  save_samples: false
+  save_top_k: 1
+  scheduler:
+    type: none
+  val_batches: 10
+  val_frequency: 20
+visualization:
+  collage_cols: 3
+  group_by_task: true
+  include_query: true
+  max_vis_scan: 2000
+  save_dpi: 150
+  test_samples: 6
+  test_samples_per_task: 6
+  val_samples: 3
+  val_samples_per_task: 3

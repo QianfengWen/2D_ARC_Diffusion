@@ -1,0 +1,35 @@
+{
+  "dataset_id": "tasks_fill-red+color-row+two-of-three+l-path+narrow-connect_train400_test100_grid10_ctxrandom_tpt1500_tet100_shard50000_seed42",
+  "created_at": 1757483404.866785,
+  "config": {
+    "tasks_codes": [
+      "bb43febb",
+      "c9f8e694",
+      "cbded52d",
+      "d4a91cb9",
+      "d6ad076f"
+    ],
+    "tasks_names": [
+      "fill red",
+      "color row",
+      "two of three",
+      "L path",
+      "narrow connect"
+    ],
+    "tasks_slugs": [
+      "fill-red",
+      "color-row",
+      "two-of-three",
+      "l-path",
+      "narrow-connect"
+    ],
+    "n_train": 400,
+    "n_test": 100,
+    "seed": 42,
+    "grid_size": 10,
+    "ctx_policy": "random",
+    "train_per_task": 1500,
+    "test_per_task": 100,
+    "shard_size": 50000
+  }
+}

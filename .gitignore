@@ -23,3 +23,12 @@ viz_out/
 
 # Logs
 *.log
+
+# Experiment outputs
+experiments/**/models/
+experiments/**/logs/val_vis/
+experiments/**/results/predictions.json
+experiments/**/data/episodes/
+experiments/**/data/synthetic_tasks/*.json
+!experiments/**/config.yaml
+!experiments/**/data/synthetic_tasks/generation_config.yaml

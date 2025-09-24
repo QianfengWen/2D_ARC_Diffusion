@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from ..data.generators import TASKS, make_unique_train_test, save_task_json
+from ..data.task_names import get_task_slug, get_task_display_name
 
 
 def setup_directories(config) -> None:
@@ -44,9 +45,10 @@ def generate_dataset_id(config) -> str:
     Format: tasks_<task1+task2>_train<n>_test<n>_grid<n>_ctx<policy>_tpt<n>_shard<n>_seed<n>
     Example: tasks_bb43febb+c9f8e694_train400_test100_grid10_ctxrandom_tpt1000_shard50000_seed42
     """
-    # Sort tasks for consistent naming
+    # Sort tasks for consistent naming and use friendly slugs in the ID
     tasks = sorted(config.data.generation.tasks)
-    tasks_str = "+".join(tasks)
+    task_slugs = [get_task_slug(t) for t in tasks]
+    tasks_str = "+".join(task_slugs)
     
     dataset_id = (
         f"tasks_{tasks_str}_"
@@ -121,11 +123,18 @@ def create_central_dataset(config, dataset_id: str) -> Tuple[str, str]:
     generate_episodes_in_dir(config, task_paths, episodes_dir)
     
     # Save dataset metadata
+    # Prepare friendly names/slugs for metadata
+    task_codes = list(config.data.generation.tasks)
+    task_names = [get_task_display_name(code) for code in task_codes]
+    task_slugs = [get_task_slug(code) for code in task_codes]
+
     metadata = {
         "dataset_id": dataset_id,
         "created_at": os.path.getctime(dataset_dir),
         "config": {
-            "tasks": config.data.generation.tasks,
+            "tasks_codes": task_codes,
+            "tasks_names": task_names,
+            "tasks_slugs": task_slugs,
             "n_train": config.data.generation.n_train,
             "n_test": config.data.generation.n_test,
             "seed": config.data.generation.seed,

@@ -74,6 +74,234 @@ def save_task_json(path: str, train_pairs: List[Tuple[Grid,Grid]], test_pairs: L
     with open(path, "w") as f:
         json.dump(obj, f)
 
+# -------------------- New Tasks (occ+color subset) --------------------
+
+def gen_3aa6fb7a_single(h: int = 10, w: int = 10,
+                        n_min: int = 3, n_max: int = 6) -> Tuple[Grid, Grid]:
+    """L corner fill (code 3aa6fb7a).
+
+    Input: several 2x2 orange (7) "L" blocks (3 of 4 cells filled) placed on an
+    empty canvas.
+    Output: same as input, with the missing corner of each L filled with black (1).
+
+    Notes:
+    - Non-overlapping 2x2 anchors to avoid ambiguous merges.
+    - Keeps colors fixed: L=7, corner fill=1.
+    """
+    grid = zeros(h, w)
+
+    # Reserve cell occupancy to avoid L blocks overlapping.
+    occupied = set()  # cells belonging to any L footprint
+    anchors: List[Tuple[int, int, Tuple[int, int]]] = []  # (top,left, missing_offset)
+
+    n = random.randint(n_min, n_max)
+    attempts = 0
+    while len(anchors) < n and attempts < 200:
+        attempts += 1
+        top = random.randint(0, h - 2)
+        left = random.randint(0, w - 2)
+        # 2x2 footprint cells
+        footprint = [(top + dr, left + dc) for dr in (0, 1) for dc in (0, 1)]
+        # Disallow overlap and side-adjacency with existing L cells
+        overlaps = any(c in occupied for c in footprint)
+        if overlaps:
+            continue
+        touches = False
+        for r, c in footprint:
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                if (r + dr, c + dc) in occupied:
+                    touches = True
+                    break
+            if touches:
+                break
+        if touches:
+            continue
+        # Choose which corner is missing in the L (one of the four offsets)
+        missing = random.choice([(0, 0), (0, 1), (1, 0), (1, 1)])
+        anchors.append((top, left, missing))
+        occupied.update(footprint)
+
+    # Build input by painting the L's (three orange 7 cells per 2x2)
+    for top, left, miss in anchors:
+        for dr in (0, 1):
+            for dc in (0, 1):
+                if (dr, dc) == miss:
+                    continue
+                grid[top + dr][left + dc] = 7
+
+    out = deepcopy(grid)
+    # Fill each missing corner with black (1)
+    for top, left, miss in anchors:
+        r = top + miss[0]
+        c = left + miss[1]
+        out[r][c] = 1
+
+    return grid, out
+
+
+def gen_1bfc4729_single(h: int = 10, w: int = 10,
+                        top_color: Optional[int] = None,
+                        bottom_color: Optional[int] = None) -> Tuple[Grid, Grid]:
+    """Two‑tone frame (code 1bfc4729) – corrected to spec.
+
+    Input: exactly two dots:
+      - one at row index 2 (3rd row) with color top_color
+      - one at row index h-3 (3rd last row) with color bottom_color
+      - columns are chosen randomly; colors are distinct, non-zero.
+
+    Output:
+      - Full outside frame: top half colored top_color, bottom half bottom_color.
+      - Full horizontal stripes on rows 2 and h-3 using top_color and bottom_color
+        respectively.
+    """
+    # Pick distinct, non-zero colors
+    palette = [c for c in range(1, 10)]
+    if top_color is None:
+        top_color = random.choice(palette)
+    if bottom_color is None:
+        rest = [c for c in palette if c != top_color]
+        bottom_color = random.choice(rest)
+
+    inp = zeros(h, w)
+    # Place dots at required rows
+    c1 = random.randint(0, w - 1)
+    c2 = random.randint(0, w - 1)
+    inp[2][c1] = top_color
+    inp[h - 3][c2] = bottom_color
+
+    out = zeros(h, w)
+    mid = (h - 1) // 2
+
+    # Top and bottom horizontal borders
+    for c in range(w):
+        out[0][c] = top_color
+        out[h - 1][c] = bottom_color
+
+    # Left & right vertical borders; color depends on row half
+    for r in range(h):
+        col = top_color if r <= mid else bottom_color
+        out[r][0] = col
+        out[r][w - 1] = col
+
+    # Required full stripes at rows 2 and h-3
+    tr = 2
+    br = h - 3
+    for c in range(1, w - 1):
+        out[tr][c] = top_color
+        out[br][c] = bottom_color
+
+    return inp, out
+
+
+def gen_0ca9ddb6_single(h: int = 10, w: int = 10,
+                        n_red: Tuple[int, int] = (1, 2),
+                        n_black: Tuple[int, int] = (1, 2),
+                        n_orange: Tuple[int, int] = (0, 2),
+                        n_purple: Tuple[int, int] = (0, 2)) -> Tuple[Grid, Grid]:
+    """Color plus (code 0ca9ddb6).
+
+    Rules (fixed colors as per task):
+      - Red seed (2): paint dark-blue (1) at the four diagonal neighbors.
+      - Black seed (1): paint light-blue (8) at the four orthogonal neighbors.
+      - Orange (7) and Purple (6) seeds are inert (no effect).
+      - No overlaps: seeds and generated cells never overlap each other.
+
+    The generator samples a small number of seeds and ensures their implied
+    generated cells do not conflict.
+    """
+    inp = zeros(h, w)
+    out = deepcopy(inp)
+
+    reserved = set()  # cells that must remain free (seeds or generated or 3x3 blocks)
+
+    def inside(r: int, c: int) -> bool:
+        return 0 <= r < h and 0 <= c < w
+
+    def can_place(seed_pos: Tuple[int, int], deltas: List[Tuple[int, int]]) -> bool:
+        r, c = seed_pos
+        # Need full 3x3 area in-bounds and free of any reserved cells
+        for rr in (r - 1, r, r + 1):
+            for cc in (c - 1, c, c + 1):
+                if not inside(rr, cc) or (rr, cc) in reserved:
+                    return False
+        # And target cells are inside as well (redundant but explicit)
+        for dr, dc in deltas:
+            rr, cc = r + dr, c + dc
+            if not inside(rr, cc) or (rr, cc) in reserved:
+                return False
+        return True
+
+    def commit(seed_pos: Tuple[int, int], seed_color: int,
+               deltas: List[Tuple[int, int]], paint_color: Optional[int]) -> None:
+        r, c = seed_pos
+        inp[r][c] = seed_color
+        # Reserve entire 3x3 block to prevent overlaps with any other seed area
+        for rr in (r - 1, r, r + 1):
+            for cc in (c - 1, c, c + 1):
+                reserved.add((rr, cc))
+        if paint_color is not None:
+            for dr, dc in deltas:
+                rr, cc = r + dr, c + dc
+                out[rr][cc] = paint_color
+                # already reserved via 3x3, but keep explicit
+                reserved.add((rr, cc))
+
+    # Target counts
+    n_r = random.randint(*n_red)
+    n_b = random.randint(*n_black)
+    n_o = random.randint(*n_orange)
+    n_p = random.randint(*n_purple)
+
+    # Place red seeds (diagonal dark-blue)
+    diag = [(-1, -1), (-1, 1), (1, -1), (1, 1)]
+    trials = 0
+    while n_r > 0 and trials < 500:
+        trials += 1
+        r = random.randint(1, h - 2)
+        c = random.randint(1, w - 2)
+        if can_place((r, c), diag):
+            commit((r, c), 2, diag, 1)
+            n_r -= 1
+
+    # Place black seeds (orthogonal light-blue)
+    ortho = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    trials = 0
+    while n_b > 0 and trials < 500:
+        trials += 1
+        r = random.randint(1, h - 2)
+        c = random.randint(1, w - 2)
+        if can_place((r, c), ortho):
+            commit((r, c), 1, ortho, 8)
+            n_b -= 1
+
+    # Place inert orange seeds (cannot overlap any reserved 3x3 areas)
+    trials = 0
+    while n_o > 0 and trials < 300:
+        trials += 1
+        r = random.randint(0, h - 1)
+        c = random.randint(0, w - 1)
+        if (r, c) not in reserved:
+            commit((r, c), 7, [], None)
+            n_o -= 1
+
+    # Place inert purple seeds (cannot overlap any reserved 3x3 areas)
+    trials = 0
+    while n_p > 0 and trials < 300:
+        trials += 1
+        r = random.randint(0, h - 1)
+        c = random.randint(0, w - 1)
+        if (r, c) not in reserved:
+            commit((r, c), 6, [], None)
+            n_p -= 1
+
+    # Output keeps seeds and generated colors; copy seeds to out where needed
+    for r in range(h):
+        for c in range(w):
+            if inp[r][c] != 0:
+                out[r][c] = inp[r][c]
+
+    return inp, out
+
 # -------------------- Task 1: bb43febb --------------------
 def gen_bb43febb_single(h: int = 10, w: int = 10) -> Tuple[Grid, Grid]:
     """Replace interior of each solid color-5 rectangle with color 2."""
@@ -481,4 +709,8 @@ TASKS = {
     "cbded52d": lambda: gen_cbded52d_single(),
     "d4a91cb9": lambda: gen_d4a91cb9_single(10,10),
     "d6ad076f": lambda: gen_d6ad076f_single(10,10),
+    # occ+color subset
+    "3aa6fb7a": lambda: gen_3aa6fb7a_single(10,10),
+    "1bfc4729": lambda: gen_1bfc4729_single(10,10),
+    "0ca9ddb6": lambda: gen_0ca9ddb6_single(10,10),
 }

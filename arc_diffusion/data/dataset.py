@@ -16,13 +16,17 @@ class EpisodesPTDataset(Dataset):
       - q_out_oh : (N,10,S,S)   float
       - q_out_idx: (N,S,S)      long
     """
-    def __init__(self, episodes_dir: str, split: str = "train"):
+    def __init__(self, episodes_dir: str, split: str = "train", return_tid: bool = False):
         assert split in ("train","test")
         self.base_dir = os.path.abspath(episodes_dir)
         with open(os.path.join(self.base_dir, "meta.json"), "r") as f:
             meta = json.load(f)
         self.S = meta["grid_size"]
         self.shards = meta["train_shards"] if split=="train" else meta["test_shards"]
+        # Optional task metadata (may be missing for legacy datasets)
+        self.task_names = meta.get("task_names")
+        self.task_slugs = meta.get("task_slugs")
+        self.return_tid = bool(return_tid)
         assert self.shards, f"No {split} shards in {episodes_dir}"
         # prefix sums for idx -> (shard_id, local_idx)
         self.cum = []
@@ -71,4 +75,13 @@ class EpisodesPTDataset(Dataset):
     def __getitem__(self, idx: int):
         shard_id, local = self._locate(idx)
         t = self._load_shard(shard_id)
-        return (t["ctx_in"][local], t["ctx_out"][local], t["q_in"][local], t["q_out_oh"][local], t["q_out_idx"][local])
+        if self.return_tid:
+            return (
+                t["ctx_in"][local], t["ctx_out"][local], t["q_in"][local],
+                t["q_out_oh"][local], t["q_out_idx"][local], t["q_tid"][local]
+            )
+        else:
+            return (
+                t["ctx_in"][local], t["ctx_out"][local], t["q_in"][local],
+                t["q_out_oh"][local], t["q_out_idx"][local]
+            )

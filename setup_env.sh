@@ -8,6 +8,7 @@
 #   PYTHON_BIN=python3.10 bash 2D_ARC_Diffusion/setup_env.sh
 #   PIP_EXTRA_ARGS="--extra-index-url https://download.pytorch.org/whl/cu121" \
 #     bash 2D_ARC_Diffusion/setup_env.sh
+#     bash setup_env.sh
 #
 # Notes:
 # - By default, the venv lives at "$PWD/.venv" so wrapper scripts that use

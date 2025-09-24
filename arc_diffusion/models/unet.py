@@ -60,12 +60,13 @@ class PairEncoder(nn.Module):
 class FlatUNet3Shot(nn.Module):
     """Flat UNet for 3-shot ARC diffusion (no spatial downsampling)."""
     
-    def __init__(self, model_ch=128, num_blocks=6, t_dim=256, ctx_dim=256):
+    def __init__(self, model_ch=128, num_blocks=6, t_dim=256, ctx_dim=256, parameterization="predict_noise"):
         super().__init__()
         self.model_ch = model_ch
         self.num_blocks = num_blocks
         self.t_dim = t_dim
         self.ctx_dim = ctx_dim
+        self.parameterization = parameterization
         
         # Input projection: concat of x_t (10 channels) + q_in (10 channels) = 20 channels
         self.in_conv = nn.Conv2d(20, model_ch, 3, padding=1)
@@ -90,7 +91,7 @@ class FlatUNet3Shot(nn.Module):
         self.ctx_enc = PairEncoder(ctx_dim=ctx_dim, ch=64)
         self.ctx_to_t = nn.Sequential(nn.SiLU(), nn.Linear(ctx_dim, t_dim))
     
-    def forward(self, x_t, q_in, t, ctx_in=None, ctx_out=None):
+    def forward(self, x_t, q_in, t, ctx_in=None, ctx_out=None, apply_softmax=None):
         """Forward pass.
         
         Args:
@@ -99,9 +100,10 @@ class FlatUNet3Shot(nn.Module):
             t: Timestep (B,)
             ctx_in: Context inputs (B, 3, 10, S, S)
             ctx_out: Context outputs (B, 3, 10, S, S)
+            apply_softmax: If specified, overrides the default softmax behavior for predict_x0
             
         Returns:
-            Predicted noise (B, 10, S, S)
+            Model prediction (B, 10, S, S) - noise, x0, or v depending on parameterization
         """
         B = x_t.size(0)
         
@@ -130,4 +132,17 @@ class FlatUNet3Shot(nn.Module):
             h = blk(h, t_emb)
         
         # Output projection
-        return self.out_conv(F.silu(self.out_norm(h)))  # predict noise
+        output = self.out_conv(F.silu(self.out_norm(h)))
+        
+        # Apply activation based on parameterization
+        if self.parameterization == "predict_x0":
+            # For x0 prediction, use softmax to ensure valid probabilities (unless overridden)
+            if apply_softmax is None:
+                apply_softmax = True  # Default behavior
+            if apply_softmax:
+                output = F.softmax(output, dim=1)
+        elif self.parameterization in ["predict_noise", "predict_v"]:
+            # For noise and v prediction, use raw output (unbounded)
+            pass
+        
+        return output

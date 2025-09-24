@@ -1,0 +1,29 @@
+{
+  "dataset_id": "tasks_color-plus+two-tone-frame+l-corner-fill_train500_test200_grid10_ctxrandom_tpt400_tet100_shard50000_seed42",
+  "created_at": 1758670832.629731,
+  "config": {
+    "tasks_codes": [
+      "3aa6fb7a",
+      "1bfc4729",
+      "0ca9ddb6"
+    ],
+    "tasks_names": [
+      "L corner fill",
+      "two-tone frame",
+      "color plus"
+    ],
+    "tasks_slugs": [
+      "l-corner-fill",
+      "two-tone-frame",
+      "color-plus"
+    ],
+    "n_train": 500,
+    "n_test": 200,
+    "seed": 42,
+    "grid_size": 10,
+    "ctx_policy": "random",
+    "train_per_task": 400,
+    "test_per_task": 100,
+    "shard_size": 50000
+  }
+}

@@ -6,6 +6,7 @@ from typing import Dict, Any, List
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
+from .data.task_names import code_from_name_or_slug, get_task_display_name
 
 
 @dataclass
@@ -28,6 +29,8 @@ class ModelConfig:
 @dataclass
 class DiffusionConfig:
     method: str = "ddpm"
+    parameterization: str = "predict_noise"  # "predict_noise", "predict_x0", "predict_v"
+    mode: str = "baseline"  # "baseline", "occupancy", "color"
     params: Dict[str, Any] = field(default_factory=lambda: {
         "timesteps": 400,
         "beta_start": 1e-4,
@@ -82,6 +85,22 @@ class TrainingConfig:
 
 
 @dataclass
+class VisualizationConfig:
+    """Visualization settings for training/validation/test collages."""
+    # Deprecated: kept for backward-compat as fallback if per-task not specified
+    val_samples: int = 3           # number of samples per validation collage (legacy)
+    test_samples: int = 6          # number of samples per test/predict collage (legacy)
+    # New per-task settings
+    val_samples_per_task: int = 3  # samples to show per task during validation
+    test_samples_per_task: int = 6 # samples to show per task during test/predict
+    group_by_task: bool = True     # save one collage per task if True
+    max_vis_scan: int = 2000       # max examples to scan when gathering per-task samples
+    collage_cols: int = 3          # number of sample blocks per row in collage
+    include_query: bool = True     # include the query input tile in the last row
+    save_dpi: int = 150            # DPI for saved PNGs
+
+
+@dataclass
 class PathConfig:
     # Paths are grouped by month/day, with a day folder (DD) and the
     # experiment name applied as the final component. Supported template vars:
@@ -111,6 +130,7 @@ class Config:
     diffusion: DiffusionConfig = field(default_factory=DiffusionConfig)
     data: DataConfig = field(default_factory=DataConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
+    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     paths: PathConfig = field(default_factory=PathConfig)
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
     
@@ -177,11 +197,27 @@ def load_config(config_path: str = "config.yaml") -> Config:
     # Handle nested data config
     data_dict = config_dict.get("data", {})
     generation = GenerationConfig(**data_dict.get("generation", {}))
+    # Normalize generation.tasks to canonical codes, allowing names/slugs in YAML
+    if generation.tasks:
+        resolved: List[str] = []
+        unknown: List[str] = []
+        for item in generation.tasks:
+            code = code_from_name_or_slug(str(item))
+            if code is None:
+                # Allow raw codes not present in TASK_NAME_MAP (custom tasks)
+                # Keep as-is and let downstream TASKS check warn if unknown.
+                # But track as unknown for better error message if none resolve.
+                unknown.append(str(item))
+                resolved.append(str(item))
+            else:
+                resolved.append(code)
+        generation.tasks = resolved
     episodes = EpisodesConfig(**data_dict.get("episodes", {}))
     loading = LoadingConfig(**data_dict.get("loading", {}))
     data = DataConfig(generation=generation, episodes=episodes, loading=loading)
     
     training = TrainingConfig(**config_dict.get("training", {}))
+    visualization = VisualizationConfig(**config_dict.get("visualization", {}))
     paths = PathConfig(**config_dict.get("paths", {}))
     hardware = HardwareConfig(**config_dict.get("hardware", {}))
     
@@ -191,6 +227,7 @@ def load_config(config_path: str = "config.yaml") -> Config:
         diffusion=diffusion,
         data=data,
         training=training,
+        visualization=visualization,
         paths=paths,
         hardware=hardware
     )
@@ -212,11 +249,14 @@ def save_config(config: Config, path: str):
         },
         "diffusion": {
             "method": config.diffusion.method,
+            "parameterization": config.diffusion.parameterization,
+            "mode": config.diffusion.mode,
             "params": config.diffusion.params
         },
         "data": {
             "generation": {
-                "tasks": config.data.generation.tasks,
+                # Save friendly display names for readability
+                "tasks": [get_task_display_name(code) for code in config.data.generation.tasks],
                 "n_train": config.data.generation.n_train,
                 "n_test": config.data.generation.n_test,
                 "seed": config.data.generation.seed,
@@ -248,6 +288,17 @@ def save_config(config: Config, path: str):
             "log_frequency": config.training.log_frequency,
             "plot_losses": config.training.plot_losses,
             "save_samples": config.training.save_samples
+        },
+        "visualization": {
+            "val_samples": config.visualization.val_samples,
+            "test_samples": config.visualization.test_samples,
+            "val_samples_per_task": config.visualization.val_samples_per_task,
+            "test_samples_per_task": config.visualization.test_samples_per_task,
+            "group_by_task": config.visualization.group_by_task,
+            "max_vis_scan": config.visualization.max_vis_scan,
+            "collage_cols": config.visualization.collage_cols,
+            "include_query": config.visualization.include_query,
+            "save_dpi": config.visualization.save_dpi,
         },
         "paths": {
             "data_root": config.paths.data_root,

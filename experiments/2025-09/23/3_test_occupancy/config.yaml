@@ -1,0 +1,71 @@
+data:
+  episodes:
+    ctx_policy: random
+    grid_size: 10
+    shard_size: 50000
+    test_per_task: 20
+    train_per_task: 100
+  generation:
+    attempts_per_example: 20
+    n_test: 10
+    n_train: 50
+    seed: 42
+    tasks:
+    - fill red
+  loading:
+    batch_size: 8
+    num_workers: 0
+    pin_memory: true
+    prefetch_factor: 2
+diffusion:
+  method: ddpm
+  mode: occupancy
+  parameterization: predict_x0
+  params:
+    beta_end: 0.02
+    beta_start: 0.0001
+    schedule: linear
+    timesteps: 100
+experiment:
+  description: 'Occupancy mode: BCE loss on occupancy probabilities (2B)'
+  name: 3_test_occupancy
+hardware:
+  compile_model: false
+  device: auto
+  mixed_precision: true
+model:
+  architecture: flat_unet_3shot
+  params:
+    ctx_dim: 256
+    model_ch: 64
+    num_blocks: 4
+    t_dim: 256
+paths:
+  data_root: experiments/2025-09/23/3_test_occupancy/data
+  logs_dir: experiments/2025-09/23/3_test_occupancy/logs
+  models_dir: experiments/2025-09/23/3_test_occupancy/models
+  output_root: experiments/2025-09/23/3_test_occupancy
+  results_dir: experiments/2025-09/23/3_test_occupancy/results
+training:
+  epochs: 20
+  learning_rate: 0.001
+  log_frequency: 10
+  optimizer: adamw
+  plot_losses: true
+  save_frequency: 10
+  save_samples: false
+  save_top_k: 2
+  scheduler:
+    type: none
+  val_batches: 2
+  val_frequency: 5
+visualization:
+  collage_cols: 2
+  group_by_task: true
+  include_query: true
+  max_vis_scan: 100
+  save_dpi: 150
+  test_samples: 6
+  test_samples_per_task: 3
+  val_samples: 3
+  val_samples_per_task: 2

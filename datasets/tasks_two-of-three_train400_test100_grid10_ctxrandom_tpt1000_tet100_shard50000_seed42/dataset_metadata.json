@@ -1,0 +1,23 @@
+{
+  "dataset_id": "tasks_two-of-three_train400_test100_grid10_ctxrandom_tpt1000_tet100_shard50000_seed42",
+  "created_at": 1757482188.0600333,
+  "config": {
+    "tasks_codes": [
+      "cbded52d"
+    ],
+    "tasks_names": [
+      "two of three"
+    ],
+    "tasks_slugs": [
+      "two-of-three"
+    ],
+    "n_train": 400,
+    "n_test": 100,
+    "seed": 42,
+    "grid_size": 10,
+    "ctx_policy": "random",
+    "train_per_task": 1000,
+    "test_per_task": 100,
+    "shard_size": 50000
+  }
+}
