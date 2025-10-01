@@ -1,0 +1,78 @@
+data:
+  episodes:
+    ctx_policy: random
+    grid_size: 10
+    shard_size: 50000
+    test_per_task: 100
+    train_per_task: 400
+  generation:
+    attempts_per_example: 50
+    n_test: 200
+    n_train: 500
+    seed: 42
+    tasks:
+    - L corner fill
+    - two-tone frame
+    - color plus
+    - template copy
+    - two-dot rectangle
+    - block to plus
+    - row bridge
+    - enclosed fill
+  loading:
+    batch_size: 64
+    num_workers: 4
+    pin_memory: true
+    prefetch_factor: 2
+diffusion:
+  method: ddpm
+  mode: baseline
+  parameterization: predict_noise
+  params:
+    beta_end: 0.02
+    beta_start: 0.0001
+    schedule: linear
+    timesteps: 400
+experiment:
+  description: ''
+  name: 6_8_occcol_baseline_predict_noise
+hardware:
+  compile_model: false
+  device: auto
+  mixed_precision: true
+model:
+  architecture: flat_unet_3shot
+  params:
+    ctx_dim: 256
+    model_ch: 128
+    num_blocks: 6
+    t_dim: 256
+paths:
+  data_root: experiments/2025-09/24/6_8_occcol_baseline_predict_noise/data
+  logs_dir: experiments/2025-09/24/6_8_occcol_baseline_predict_noise/logs
+  models_dir: experiments/2025-09/24/6_8_occcol_baseline_predict_noise/models
+  output_root: experiments/2025-09/24/6_8_occcol_baseline_predict_noise
+  results_dir: experiments/2025-09/24/6_8_occcol_baseline_predict_noise/results
+training:
+  epochs: 400
+  learning_rate: 0.0003
+  log_frequency: 100
+  optimizer: adamw
+  plot_losses: true
+  save_frequency: 20
+  save_samples: false
+  save_top_k: 1
+  scheduler:
+    type: none
+  val_batches: 10
+  val_frequency: 20
+visualization:
+  collage_cols: 3
+  group_by_task: true
+  include_query: true
+  max_vis_scan: 2000
+  save_dpi: 150
+  test_samples: 6
+  test_samples_per_task: 6
+  val_samples: 3
+  val_samples_per_task: 3

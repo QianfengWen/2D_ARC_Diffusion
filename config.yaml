@@ -24,9 +24,14 @@ diffusion:
   # Method - currently only ddpm available, future: [ddim, adaptive]
   method: "ddpm"
   # Parameterization mode - affects loss function and model output
-  parameterization: "predict_x0"  # ["predict_noise", "predict_x0", "predict_v"]
+  parameterization: "predict_v"  # ["predict_noise", "predict_x0", "predict_v"]
   # Mode - affects specialized loss functions (occupancy/color require predict_x0)
+
+  #--------------------------------
+  # CHANGE MODE HERE #
   mode: "baseline"  # ["baseline", "occupancy", "color"]
+  #--------------------------------
+
   params:
     timesteps: 400      # Number of diffusion steps (typical: 400, 1000)
     beta_start: 0.0001  # Noise schedule start (typical: 1e-4)
@@ -38,10 +43,10 @@ data:
   # Task generation settings
   generation:
     # Select tasks by friendly names (see arc_diffusion/data/task_names.py)
-    tasks: ["L corner fill", "two-tone frame", "color plus"]
+    tasks: ["L corner fill", "two-tone frame", "color plus", "template copy", "two-dot rectangle", "block to plus", "row bridge", "enclosed fill"]
                         #["fill red", "color row", "two of three", "L path", "narrow connect"]
-                        # occ-color subset
-                        #["L corner fill", "two-tone frame", "color plus"]
+                        # occ-color full set of 8 tasks
+                        # ["L corner fill", "two-tone frame", "color plus", "template copy", "two-dot rectangle", "block to plus", "row bridge", "enclosed fill"]
                         # You can also use slug forms: ["fill-red", ...]
                         # Or raw codes for custom tasks: ["bb43febb", ...]
     n_train: 500        # Training samples per task
@@ -66,8 +71,8 @@ data:
 
 # Training configuration
 training:
-  epochs: 200           # Number of training epochs
-  learning_rate: 0.001 # Base learning rate (typical: 1e-4 to 5e-4)
+  epochs: 500           # Number of training epochs
+  learning_rate: 0.0003 # Base learning rate (typical: 1e-4 to 5e-4)
   optimizer: "adamw"    # ["adamw", "adam"] - future: ["sgd"]
   
   # Learning rate scheduling

@@ -629,6 +629,296 @@ def gen_d6ad076f_single(h: int = 10, w: int = 10) -> Tuple[Grid, Grid]:
     out = apply_bridge_eights(g, ra, rb, mode)
     return g, out
 
+# -------------------- Task 6: 3e980e27 (Anchor-Template Replication) --------------------
+def gen_3e980e27_single(h: int = 13, w: int = 13) -> Tuple[Grid, Grid]:
+    """Place prototype shapes anchored by a colored dot; replicate by dots.
+
+    Ambiguity-free: each prototype uses only two colors (anchor + unique body),
+    and dots are only created for anchors whose prototype is present in the same
+    input. Shapes are spaced with a 1-cell margin and do not touch.
+    """
+    grid = zeros(h, w)
+    
+    # Fixed mapping from anchor color to (unique body color, geometry)
+    GEOM_T = [(0,-1),(0,1),(1,0),(2,0)]            # T-shape
+    GEOM_L = [(1,0),(2,0),(2,1)]                    # L-shape
+    GEOM_22 = [(0,1),(1,0),(1,1)]                   # 2x2 block (anchor TL)
+    GEOM_PI = [(0,-1),(0,1),(1,-1),(1,1)]           # Π-like
+    FIXED = {
+        2: (1, GEOM_T),   # red → body 1
+        3: (5, GEOM_L),   # green → body 5
+        4: (6, GEOM_22),  # yellow → body 6
+        8: (7, GEOM_PI),  # cyan → body 7
+    }
+    # Bias towards selecting 2 shapes in most examples (~70%)
+    k = 2 if random.random() < 0.7 else 1
+    selected_anchors = random.sample(list(FIXED.keys()), k=k)
+    prototypes = [(a, *FIXED[a]) for a in selected_anchors]  # (anchor, body, geom)
+
+    occ = set()
+    def clear(cells, margin=1):
+        for r, c in cells:
+            for dr in range(-margin, margin+1):
+                for dc in range(-margin, margin+1):
+                    if (r+dr, c+dc) in occ:
+                        return False
+        return True
+
+    def full_cells(base_r, base_c, geom):
+        cells = [(base_r, base_c)]
+        for dr, dc in geom:
+            cells.append((base_r+dr, base_c+dc))
+        return cells
+
+    def place_prototype(base_r, base_c, anchor_color, body_color, geom):
+        cells = full_cells(base_r, base_c, geom)
+        if any(not (0 <= r < h and 0 <= c < w) for r,c in cells):
+            return False
+        if not clear(cells):
+            return False
+        grid[base_r][base_c] = anchor_color
+        for dr, dc in geom:
+            grid[base_r+dr][base_c+dc] = body_color
+        occ.update(cells)
+        return True
+
+    # place prototypes in upper-left area; collect the ones that succeed
+    placed = []
+    for a, b, g in prototypes:
+        ok = False
+        tries = 0
+        while not ok and tries < 400:
+            tries += 1
+            r = random.randint(1, max(1, h//2))
+            c = random.randint(1, max(1, w//2))
+            ok = place_prototype(r, c, a, b, g)
+        if ok:
+            placed.append((a, b, g))
+
+    # isolated dots (to be expanded in output)
+    dots = []
+    target = random.randint(2, 4)
+    tries = 0
+    while len(dots) < target and tries < 500 and placed:
+        tries += 1
+        a, b, g = random.choice(placed)
+        r = random.randint(h//3, h-2)
+        c = random.randint(w//3, w-2)
+        cells = full_cells(r, c, g)
+        if any(not (0 <= rr < h and 0 <= cc < w) for rr,cc in cells):
+            continue
+        if not clear(cells):
+            continue
+        grid[r][c] = a
+        occ.update(cells)
+        dots.append((r, c, a, b, g))
+
+    out = deepcopy(grid)
+    for r, c, a, b, g in dots:
+        for rr, cc in full_cells(r, c, g):
+            out[rr][cc] = b
+        out[r][c] = a
+    return grid, out
+
+# -------------------- Task 7: 56ff96f3 (Two non-overlapping rectangles) --------------------  
+def gen_56ff96f3_single(h: int = 10, w: int = 10) -> Tuple[Grid, Grid]:
+    """Exactly four dots (two colors) → two disjoint filled rectangles."""
+    grid = zeros(h, w)
+    colors = random.sample([1, 2, 3, 4, 6, 7, 8], k=2)
+    rects = []  # (color, r0, c0, r1, c1)
+    attempts = 0
+    while len(rects) < 2 and attempts < 300:
+        attempts += 1
+        color = colors[len(rects)]
+        r0, r1 = sorted(random.sample(range(h), 2))
+        c0, c1 = sorted(random.sample(range(w), 2))
+        if r1 - r0 < 1 or c1 - c0 < 1:
+            continue
+        ok = True
+        for _, a0, b0, a1, b1 in rects:
+            if not (r1 < a0 or a1 < r0 or c1 < b0 or b1 < c0):
+                ok = False; break
+        if not ok:
+            continue
+        grid[r0][c0] = color
+        grid[r1][c1] = color
+        rects.append((color, r0, c0, r1, c1))
+    out = deepcopy(grid)
+    for color, r0, c0, r1, c1 in rects:
+        for r in range(r0, r1+1):
+            for c in range(c0, c1+1):
+                out[r][c] = color
+    return grid, out
+
+# -------------------- Task 8: 6c434453 (Hollow square → red plus) --------------------
+def gen_6c434453_single(h: int = 10, w: int = 10) -> Tuple[Grid, Grid]:
+    """Transform each 3x3 hollow square outline (color 1) into a red plus (2).
+
+    Shapes are spaced (no overlap or side adjacency). Other black shapes may
+    appear as distractors and remain unchanged in output.
+    """
+    grid = zeros(h, w)
+
+    PLUS = [(0, 1), (1, 0), (1, 1), (1, 2), (2, 1)]
+    HOLLOW = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 2)]
+    HBAR = [(0, 0), (0, 1), (0, 2)]
+    VBAR = [(0, 0), (1, 0), (2, 0)]
+
+    occ = set()
+    def can_place(cells, margin=1):
+        for r, c in cells:
+            if not (0 <= r < h and 0 <= c < w):
+                return False
+            for dr in range(-margin, margin+1):
+                for dc in range(-margin, margin+1):
+                    if (r+dr, c+dc) in occ:
+                        return False
+        return True
+    def draw(cells):
+        for r, c in cells:
+            grid[r][c] = 1
+            occ.add((r, c))
+
+    hollow_locs = []
+    attempts = 0
+    goal = random.randint(2, 3)
+    while len(hollow_locs) < goal and attempts < 300:
+        attempts += 1
+        r = random.randint(0, h-3)
+        c = random.randint(0, w-3)
+        cells = [(r+dr, c+dc) for dr, dc in HOLLOW]
+        if can_place(cells):
+            draw(cells)
+            hollow_locs.append((r, c))
+
+    # Place additional distractors (bars)
+    attempts = 0
+    while len(occ) < 25 and attempts < 400:
+        attempts += 1
+        r = random.randint(0, h-3); c = random.randint(0, w-3)
+        shape = random.choice([HBAR, VBAR])
+        cells = [(r+dr, c+dc) for dr, dc in shape]
+        if can_place(cells):
+            draw(cells)
+
+    out = deepcopy(grid)
+    # Replace each hollow square with a red plus (clear the 3x3 then draw plus)
+    for r, c in hollow_locs:
+        for rr in range(r, r+3):
+            for cc in range(c, c+3):
+                out[rr][cc] = 0
+        for dr, dc in PLUS:
+            out[r+dr][c+dc] = 2
+    return grid, out
+
+# -------------------- Task 9: a699fb00 (Horizontal Connect) --------------------
+def gen_a699fb00_single(h: int = 10, w: int = 10) -> Tuple[Grid, Grid]:
+    """Rowwise 1-0-1 to 1-2-1 replacement (matches occ+color/a699fb00).
+
+    Input: rows contain black dots (1) separated by single zeros. Output: every
+    1-0-1 pattern becomes 1-2-1; longer gaps are untouched.
+    """
+    grid = zeros(h, w)
+
+    # Synthesize rows with patterns like 1 0 1 0 1 ...
+    used_rows = set()
+    n_rows = random.randint(2, 4)
+    for _ in range(n_rows):
+        row = random.randint(0, h-1)
+        if row in used_rows:
+            continue
+        used_rows.add(row)
+        run_len = random.randint(2, min(4, max(2, w//3)))
+        start_min = 1 if w > 6 else 0
+        start = random.randint(start_min, max(start_min, w - (2*run_len-1)))
+        c = start
+        for _ in range(run_len):
+            grid[row][c] = 1
+            c += 2
+
+    out = deepcopy(grid)
+    for r in range(h):
+        for c in range(w-2):
+            if grid[r][c] == 1 and grid[r][c+1] == 0 and grid[r][c+2] == 1:
+                out[r][c+1] = 2
+
+    return grid, out
+
+# -------------------- Task 10: e73095fd (Closed rectangle + crossing lines) --------------------
+def gen_e73095fd_single(h: int = 13, w: int = 19) -> Tuple[Grid, Grid]:
+    """Exactly one closed rectangular outline + a few non-interfering lines.
+
+    - Place one non-overlapping outlined rectangle (5) with a 1-cell margin.
+    - Draw at most one horizontal and one vertical line segment, each outside
+      the rectangle + margin, and not full-length to avoid accidental enclosures.
+    - Output fills only the rectangle interior with 4.
+    """
+    grid = zeros(h, w)
+
+    occ = set()
+    def rect_border(top, left, rh, rw, margin=1):
+        border = ([(r, left) for r in range(top, top+rh)] +
+                  [(r, left+rw-1) for r in range(top, top+rh)] +
+                  [(top, c) for c in range(left, left+rw)] +
+                  [(top+rh-1, c) for c in range(left, left+rw)])
+        for r, c in border:
+            for dr in range(-margin, margin+1):
+                for dc in range(-margin, margin+1):
+                    rr, cc = r+dr, c+dc
+                    if not (0 <= rr < h and 0 <= cc < w) or (rr, cc) in occ:
+                        return None
+        return border
+
+    rects = []
+    attempts = 0
+    target = 1
+    while len(rects) < target and attempts < 400:
+        attempts += 1
+        rh = random.randint(4, max(4, h//2))
+        rw = random.randint(4, max(4, w//2))
+        top = random.randint(0, h-rh)
+        left = random.randint(0, w-rw)
+        border = rect_border(top, left, rh, rw)
+        if not border:
+            continue
+        for r, c in border:
+            grid[r][c] = 5
+            occ.add((r, c))
+        rects.append((top, left, rh, rw))
+
+    # A few short crossing lines outside the rectangle area
+    if rects:
+        top, left, rh, rw = rects[0]
+        forbidden_rows = set(range(max(0, top-1), min(h, top+rh+1)))
+        forbidden_cols = set(range(max(0, left-1), min(w, left+rw+1)))
+        # Horizontal segment
+        if random.random() < 0.8:
+            candidates = [rr for rr in range(1, h-1) if rr not in forbidden_rows]
+            if candidates:
+                r = random.choice(candidates)
+                seg_len = random.randint(3, max(3, w//2))
+                c0 = random.randint(1, max(1, w-seg_len-1))
+                for c in range(c0, c0+seg_len):
+                    grid[r][c] = 5
+                    occ.add((r, c))
+        # Vertical segment
+        if random.random() < 0.8:
+            candidates = [cc for cc in range(1, w-1) if cc not in forbidden_cols]
+            if candidates:
+                c = random.choice(candidates)
+                seg_len = random.randint(3, max(3, h//2))
+                r0 = random.randint(1, max(1, h-seg_len-1))
+                for r in range(r0, r0+seg_len):
+                    grid[r][c] = 5
+                    occ.add((r, c))
+
+    out = deepcopy(grid)
+    for top, left, rh, rw in rects:
+        for r in range(top+1, top+rh-1):
+            for c in range(left+1, left+rw-1):
+                out[r][c] = 4
+    return grid, out
+
 # -------------------- Uniqueness machinery --------------------
 def serialize_grid(grid: Grid) -> bytes:
     """Compactly serialize a grid to bytes for hashing."""
@@ -713,4 +1003,10 @@ TASKS = {
     "3aa6fb7a": lambda: gen_3aa6fb7a_single(10,10),
     "1bfc4729": lambda: gen_1bfc4729_single(10,10),
     "0ca9ddb6": lambda: gen_0ca9ddb6_single(10,10),
+    # New occ+color tasks
+    "3e980e27": lambda: gen_3e980e27_single(10,10),
+    "56ff96f3": lambda: gen_56ff96f3_single(10,10),
+    "6c434453": lambda: gen_6c434453_single(10,10),
+    "a699fb00": lambda: gen_a699fb00_single(10,10),
+    "e73095fd": lambda: gen_e73095fd_single(10,10),
 }

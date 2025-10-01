@@ -32,3 +32,6 @@ experiments/**/data/episodes/
 experiments/**/data/synthetic_tasks/*.json
 !experiments/**/config.yaml
 !experiments/**/data/synthetic_tasks/generation_config.yaml
+
+# tests
+tests/

@@ -20,10 +20,16 @@ TASK_NAME_MAP: Dict[str, str] = {
     "cbded52d": "two of three",
     "d4a91cb9": "L path",
     "d6ad076f": "narrow connect",
-    # occ+color subset (new)
+    # occ+color subset (original)
     "3aa6fb7a": "L corner fill",
     "1bfc4729": "two-tone frame",
-    "0ca9ddb6": "color plus",  # Will be added next
+    "0ca9ddb6": "color plus",
+    # occ+color subset (new)
+    "3e980e27": "template copy",
+    "56ff96f3": "two-dot rectangle",
+    "6c434453": "block to plus",
+    "a699fb00": "row bridge",
+    "e73095fd": "enclosed fill",
 }
 
 
